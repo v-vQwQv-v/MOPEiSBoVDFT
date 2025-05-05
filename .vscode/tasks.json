@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "setup_python_env",
+            "type": "shell",
+            "command": "E:/isaac-sim4.5.0-rc.36/setup_python_env.bat & set > \"${workspaceFolder}/.vscode/.standalone_examples.env\"",
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "cmd.exe",
+                        "args": ["/c"]
+                    }
+                }
+            },
+            "args": [],
+            "problemMatcher": []
+        }
+    ]
+}
