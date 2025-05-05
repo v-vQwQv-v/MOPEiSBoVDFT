@@ -14,8 +14,6 @@ import sys
 sys.path.insert(0, str(script_dir))
 import parameter as param
 
-
-
 stage = usd.get_context().get_stage()
 original_box_prim = stage.GetPrimAtPath("/World/warehouse_with_forklifts/SM_CardBoxC_01")
 if not original_box_prim.IsValid():

@@ -10,11 +10,19 @@ import cv2
 import os
 import numpy as np
 
-rgb_dir = "/RGBFrame"
+script_dir = "E:/VScode/VSworkspace/pyworkspace/isaacsimpy"
+rgb_dir = f"{script_dir}/RGBFrame"
+depth_dir = f"{script_dir}/depthFrame"
 
 if not os.path.exists(rgb_dir):
     os.makedirs(rgb_dir)
     print(f"Created folder: {rgb_dir}")
+else:
+    print(f"Image folder already exists.")
+
+if not os.path.exists(depth_dir):
+    os.makedirs(depth_dir)
+    print(f"Created folder: {depth_dir}")
 else:
     print(f"Image folder already exists.")
 
