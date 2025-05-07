@@ -109,6 +109,3 @@ xform.AddXformOp(UsdGeom.XformOp.TypeRotateXYZ, UsdGeom.XformOp.PrecisionDouble)
 
 
 
-
-
-

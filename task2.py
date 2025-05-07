@@ -7,19 +7,22 @@ import asyncio
 import omni.usd as usd
 import random
 import pxr.Gf as Gf
-from pxr import UsdGeom
+from pxr import Usd, UsdGeom
 from isaacsim.sensors.camera import Camera
 from omni.replicator.core import AnnotatorRegistry
 import cv2
 import os
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import json
 
 # Parameters
 param_time = 300
 param_iter = 0
 param_numBoxes = 20
 param_iter_soll = 50
+paramImg_width = 1024
+paramImg_height = 512
 target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
 aimed_point = np.array([0, 0, 1.5])
 
@@ -48,7 +51,7 @@ def bboxDict_to_transform(bbox_dict):
     scale = np.array([np.linalg.norm(rot_mtx[:, 0]), np.linalg.norm(rot_mtx[:, 1]), np.linalg.norm(rot_mtx[:, 2])])
     size_local = (np.abs(corner[1] - corner[0])).tolist()
     size_world = scale * size_local
-    return center_world, size_world, euler_angle
+    return center_world, size_world, euler_angle.tolist()
 
 def camRotMtx_to_quaternion(R):
     """
@@ -88,13 +91,16 @@ def camPosOri(target_point, aimed_point):
     R_1to2 = np.linalg.inv(np.vstack((x2, y2, z2)).T) @ (np.vstack((x1, y1, z1)).T)
     R_0to1 = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
     R = R_1to2 @ R_0to1
-    pitch = np.arcsin(-R[2, 0])
-    roll = np.arctan2(R[2,1], R[2,2])
-    yaw = np.arctan2(R[1,0], R[0,0])
+    # pitch = np.arcsin(-R[2, 0])
+    # roll = np.arctan2(R[2,1], R[2,2])
+    # yaw = np.arctan2(R[1,0], R[0,0])
     q = camRotMtx_to_quaternion(R)
-    return q, roll, pitch, yaw
+    return q
 
 def delete_box_copy():
+    """
+    delete the box copies in the scene.
+    """
     stage_box_copy = [stage.GetPrimAtPath(f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}") for i in range(param_numBoxes)]
     for i, box_prim in enumerate(stage_box_copy):
         if box_prim.IsValid():
@@ -105,6 +111,29 @@ def delete_box_copy():
         if box_prim.IsValid():
             stage.RemovePrim(box_prim.GetPath())
             print(f"Deleted {box_prim.GetPath()}")
+
+def get_obj_pose(stage, prim_path):
+    """
+    Input: stage: the stage of the scene.
+           prim_path: the path of the object. e.g. "/World/warehouse_with_forklifts/SM_CardBoxC_Copy_0"
+    Output: obj_pose: the pose of the object. [x, y, z, qx, qy, qz, qw]
+    """
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        raise ValueError(f"Prim '{prim_path}' not found.")
+
+    xform = UsdGeom.Xform(prim)
+    matrix = xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+
+    # 位置
+    translation = matrix.ExtractTranslation()
+
+    # rotation matrix -> quaternion
+    rotation_matrix = matrix.ExtractRotationMatrix()
+    rot_np = np.array(rotation_matrix.GetTranspose())  # 注意转置
+    quat = R.from_matrix(rot_np).as_quat()  # [x, y, z, w] format
+
+    return [translation[0], translation[1], translation[2], quat[0], quat[1], quat[2], quat[3]]  # [x, y, z], [x, y, z, w]
 
 # Directories for saving images and labels
 script_dir = "E:/VScode/VSworkspace/pyworkspace/isaacsimpy"
@@ -130,7 +159,7 @@ if not os.path.exists(label_dir):
 else:
     print(f"Label folder already exists.")
 
-# Start
+"""Start"""
 stage = usd.get_context().get_stage()
 layer = stage.GetRootLayer()
 
@@ -139,8 +168,9 @@ original_box_prim = stage.GetPrimAtPath("/World/warehouse_with_forklifts/SM_Card
 if not original_box_prim.IsValid():
     print("Error: Original box not found!")
 
-camera = Camera(prim_path="/World/Camera_0", resolution=(1024, 512))
+camera = Camera(prim_path="/World/Camera_0", resolution=(paramImg_width, paramImg_height))
 
+"""the main loop"""
 async def my_task():
     global param_numBoxes, param_iter, param_time, target_point, aimed_point
     timeline = omni.timeline.get_timeline_interface()
@@ -160,10 +190,10 @@ async def my_task():
     # Main Loop
     while True:
         await asyncio.sleep(0.1)
-        q, camRoll, camPitch, camYaw = camPosOri(target_point, aimed_point)
+        camOri = camPosOri(target_point, aimed_point)
         camera.set_world_pose(
             position=target_point,
-            orientation=q,  
+            orientation=camOri,  
         ) 
         await asyncio.sleep(0.1)
         # Wait for the next frame to be ready
@@ -193,13 +223,13 @@ async def my_task():
         camera.add_motion_vectors_to_frame()
         await asyncio.sleep(1)
 
-        # Get the RGBA image and save it
+        """Get the RGBA image and save it"""
         rgb_image = camera.get_rgba()
         print(f" Get RGBA with Frame_{param_iter} is {rgb_image is not None}")
         bgr_image = cv2.cvtColor(rgb_image[..., :3], cv2.COLOR_RGB2BGR)
         cv2.imwrite(f"{rgb_dir}/rgbFrame_{param_iter}.png", bgr_image)
 
-        # Get the depth image and save it
+        """Get the depth image and save it"""
         depth_data = depth_annotator.get_data() 
         print(f" Get depth data with Frame_{param_iter} is {depth_data is not None}")
         depth_data_n = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
@@ -207,6 +237,86 @@ async def my_task():
         depth_image = cv2.applyColorMap(depth_data_n, cv2.COLORMAP_JET)
         cv2.imwrite(f"{rgb_dir}/depthFrame_{param_iter}.png", depth_image)
         np.savetxt(f"{depth_dir}/depthData_{param_iter}.csv", depth_data, delimiter=' ')
+
+        """
+        Get Labels and save them
+        The json-file of labels shounld be like this:
+        {
+            "id": [1, 2, 3],
+            "instanceSemantics": [semantic image with box id, where background is -1],
+            "objPose": [[x, y, z, roll, pitch, yaw, size_x, size_y, size_z],...],
+            "camPose": [x, y, z, qx, qy, qz, qw],
+            "camParam": [horizontal_aperture, vertical_aperture, focal, paramImg_width, paramImg_height]
+        }
+        """
+
+        """camPose"""
+        try:
+            camPose = get_obj_pose(stage, "/World/Camera_0")
+            print(f"camPose with Frame_{param_iter}: {camPose}")
+        except ValueError:
+            print(f"camPose with Frame_{param_iter}: False!")
+
+        """camParam"""
+        try:
+            horizontal_aperture = camera.get_horizontal_aperture()  
+            focal_length = camera.get_focal_length() 
+            vertical_aperture = horizontal_aperture * (paramImg_height / paramImg_width)
+            print(f"horizontal_aperture: {horizontal_aperture}, vertical_aperture: {vertical_aperture}, focal_length: {focal_length}")
+            camParam = [horizontal_aperture, vertical_aperture, focal_length]
+        except ValueError:
+            print(f"camParam with Frame_{param_iter}: False!")
+        await asyncio.sleep(0.1)
+
+        """instanceSemantics"""
+        try:
+            instanceSemantic_data = instanceSemantic_annotator.get_data()
+            print(f"Get instanceSemantic data with Frame_{param_iter} is {instanceSemantic_data is not None}")
+            id_to_labels_instanceSemantic = instanceSemantic_data['info']['idToLabels']
+            mask_instanceSemantic = np.zeros((paramImg_height, paramImg_width), dtype=np.int32)
+            mask_instanceSemantic.fill(-1)
+            for sem_id, label_info in id_to_labels_instanceSemantic.items():
+                for i in range(param_numBoxes):
+                    if label_info == f'/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}/SM_CardBoxC_01':
+                        # print(f"box_id: {sem_id}")
+                        """
+                        in this place the code of instanceSemantic_image drawing is not written.
+                        """
+                        y_coords, x_coords = np.where(instanceSemantic_data['data'] == int(sem_id))
+                        mask_instanceSemantic[y_coords, x_coords] = i 
+        except ValueError:
+            print(f"instanceSemantics with Frame_{param_iter}: False!")
+        await asyncio.sleep(0.1)
+
+        """objPose"""
+        try:
+            bounding_box_3d_data = bounding_box_3d_anno.get_data()
+            print(f"Get bounding_box_3d data with Frame_{param_iter} is {bounding_box_3d_data is not None}")
+            bounding_box_3d_dd = bounding_box_3d_data['data']
+            prim_paths = bounding_box_3d_data['info']['primPaths']
+            objPose = np.zeros((param_numBoxes, 9))
+            idOutScene = []
+            for i in range(param_numBoxes):
+                box_prim_path = f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}/SM_CardBoxC_01"
+                if box_prim_path in prim_paths:
+                    index_id = prim_paths.index(box_prim_path)
+                    bbox_dict = bounding_box_3d_dd[index_id]
+                    center_world, size_world, euler_angle = bboxDict_to_transform(bbox_dict)
+                    objPose[i, :] = center_world + size_world + euler_angle
+                else:
+                    idOutScene.append(i)
+            print(f"Scene without boxes: {idOutScene}")
+        except ValueError:
+            print(f"objPose with Frame_{param_iter}: False!")
+
+        """labal to json"""
+        label = dict(id = list(range(0, 20)),
+                     instanceSemantics = mask_instanceSemantic.tolist(),
+                     objPose = objPose.tolist(),
+                     camPose = camPose,
+                     camParam = camParam)
+        with open(f"{label_dir}/label_{param_iter}.json", "w", encoding="utf-8") as file:
+            json.dump(label, file, ensure_ascii=False, indent=4)        
 
         param_iter += 1
         await asyncio.sleep(1)

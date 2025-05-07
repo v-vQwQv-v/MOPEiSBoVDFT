@@ -60,3 +60,41 @@ camera.set_world_pose(
     position=[8.0, 0.0, 1.5],
     orientation=[0, 0, 0, 1],  
 ) 
+
+# 获取相机位姿、焦距等信息
+from pxr import Usd, UsdGeom
+from scipy.spatial.transform import Rotation as R
+import omni.usd as usd
+
+def get_prim_pose(stage, prim_path):
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim:
+        raise ValueError(f"Prim '{prim_path}' not found.")
+
+    xform = UsdGeom.Xform(prim)
+    matrix = xform.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+
+    # 位置
+    translation = matrix.ExtractTranslation()
+
+    # rotation matrix -> quaternion
+    rotation_matrix = matrix.ExtractRotationMatrix()
+    rot_np = np.array(rotation_matrix.GetTranspose())  # 注意转置
+    quat = R.from_matrix(rot_np).as_quat()  # [x, y, z, w] format
+
+    return {
+        "position": (translation[0], translation[1], translation[2]),
+        "quaternion_xyzw": quat.tolist(),  # [x, y, z, w]
+    }
+
+
+stage = usd.get_context().get_stage()
+pose = get_prim_pose(stage, "/World/Camera_0")
+print(pose)
+
+
+
+horizontal_aperture = camera.get_horizontal_aperture()  # 单位：毫米      # 单位：毫米
+focal_length = camera.get_focal_length() 
+
+print(f"horizontal_aperture: {horizontal_aperture}, vertical_aperture: {horizontal_aperture * (512 / 1024)}, focal_length: {focal_length}")

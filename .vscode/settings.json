@@ -678,5 +678,6 @@
     // Use flake8 for linting
     "python.linting.pylintEnabled": false,
     "python.linting.flake8Enabled": true,
-    "python.languageServer": "Pylance"
+    "python.languageServer": "Pylance",
+    "python.analysis.autoImportCompletions": false
 }
