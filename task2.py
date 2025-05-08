@@ -23,7 +23,6 @@ param_numBoxes = 20
 param_iter_soll = 50
 paramImg_width = 1024
 paramImg_height = 512
-target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
 aimed_point = np.array([0, 0, 1.5])
 
 # Functions
@@ -135,6 +134,33 @@ def get_obj_pose(stage, prim_path):
 
     return [translation[0], translation[1], translation[2], quat[0], quat[1], quat[2], quat[3]]  # [x, y, z], [x, y, z, w]
 
+def serialize_label_data(label_dict, filename):
+    def format_array_2d(arr, indent_level=2):
+        indent = ' ' * (indent_level * 4)
+        lines = []
+        for row in arr:
+            row_str = ', '.join(str(int(v)) if isinstance(v, (int, np.integer)) else f"{v:.6g}" for v in row)
+            lines.append(indent + "[" + row_str + "]")
+        return "[\n" + ",\n".join(lines) + "\n" + (' ' * 4 * (indent_level - 1)) + "]"
+
+    formatted_json = "{\n"
+
+    # 普通字段直接写
+    for key in ["id", "camPose", "camParam"]:
+        formatted_json += f'    "{key}": {json.dumps(label_dict[key], ensure_ascii=False)},\n'
+
+    # instanceSemantics 保留原 shape 排列
+    formatted_json += f'    "instanceSemantics": {format_array_2d(label_dict["instanceSemantics"], indent_level=2)},\n'
+
+    # objPose 也可按原 shape（每行为一个 box）
+    formatted_json += f'    "objPose": {format_array_2d(label_dict["objPose"], indent_level=2)}\n'
+
+    formatted_json += "}"
+
+    # 写入文件
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(formatted_json)
+
 # Directories for saving images and labels
 script_dir = "E:/VScode/VSworkspace/pyworkspace/isaacsimpy"
 rgb_dir = f"{script_dir}/RGBFrame"
@@ -190,6 +216,7 @@ async def my_task():
     # Main Loop
     while True:
         await asyncio.sleep(0.1)
+        target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
         camOri = camPosOri(target_point, aimed_point)
         camera.set_world_pose(
             position=target_point,
@@ -289,25 +316,20 @@ async def my_task():
         await asyncio.sleep(0.1)
 
         """objPose"""
-        try:
-            bounding_box_3d_data = bounding_box_3d_anno.get_data()
-            print(f"Get bounding_box_3d data with Frame_{param_iter} is {bounding_box_3d_data is not None}")
-            bounding_box_3d_dd = bounding_box_3d_data['data']
-            prim_paths = bounding_box_3d_data['info']['primPaths']
-            objPose = np.zeros((param_numBoxes, 9))
-            idOutScene = []
-            for i in range(param_numBoxes):
-                box_prim_path = f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}/SM_CardBoxC_01"
-                if box_prim_path in prim_paths:
-                    index_id = prim_paths.index(box_prim_path)
-                    bbox_dict = bounding_box_3d_dd[index_id]
-                    center_world, size_world, euler_angle = bboxDict_to_transform(bbox_dict)
-                    objPose[i, :] = center_world + size_world + euler_angle
-                else:
-                    idOutScene.append(i)
-            print(f"Scene without boxes: {idOutScene}")
-        except ValueError:
-            print(f"objPose with Frame_{param_iter}: False!")
+        bounding_box_3d_data = bounding_box_3d_anno.get_data()
+        print(f"Get bounding_box_3d data with Frame_{param_iter} is {bounding_box_3d_data is not None}")
+        bounding_box_3d_dd = bounding_box_3d_data['data']
+        prim_paths = bounding_box_3d_data['info']['primPaths']
+        objPose = np.zeros((param_numBoxes, 9))
+        for i in range(param_numBoxes):
+            box_prim_path = f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}/SM_CardBoxC_01"
+            if box_prim_path in prim_paths:
+                index_id = prim_paths.index(box_prim_path)
+                bbox_dict = bounding_box_3d_dd[index_id]
+                center_world, size_world, euler_angle = bboxDict_to_transform(bbox_dict)
+                objPose[i, :] = np.concatenate((center_world, size_world, euler_angle))
+            else:
+                print(f"In Frame_{param_iter} without box_{i}")
 
         """labal to json"""
         label = dict(id = list(range(0, 20)),
@@ -315,8 +337,9 @@ async def my_task():
                      objPose = objPose.tolist(),
                      camPose = camPose,
                      camParam = camParam)
-        with open(f"{label_dir}/label_{param_iter}.json", "w", encoding="utf-8") as file:
-            json.dump(label, file, ensure_ascii=False, indent=4)        
+        # with open(f"{label_dir}/label_{param_iter}.json", "w", encoding="utf-8") as file:
+        #     json.dump(label, file, ensure_ascii=False, indent=4)      
+        serialize_label_data(label, f"{label_dir}/label_{param_iter}.json")  
 
         param_iter += 1
         await asyncio.sleep(1)
