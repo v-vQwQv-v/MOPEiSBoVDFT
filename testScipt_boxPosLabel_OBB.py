@@ -42,7 +42,7 @@ print(f"bounding_box_3d_info: {bounding_box_3d_data['info']}")
 print(f"prim_paths: {len(prim_paths)}")
 
 
-box_prim_path = f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_0/SM_CardBoxC_01"
+box_prim_path = f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_4/SM_CardBoxC_01"
 
 try:
     index_id = prim_paths.index(box_prim_path)
