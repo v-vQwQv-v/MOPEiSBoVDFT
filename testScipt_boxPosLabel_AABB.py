@@ -35,7 +35,7 @@ center = (min_corner + max_corner) / 2
 extents = max_corner - min_corner
 xform = UsdGeom.Xformable(bbox_prim)
 xform.AddTranslateOp().Set(center)
-xform.AddScaleOp().Set(extents)
+xform.AddScaleOp().Set(extents) 
 
 # 第六步：保存位姿
 

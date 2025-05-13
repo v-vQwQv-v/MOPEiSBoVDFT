@@ -189,6 +189,9 @@ else:
 stage = usd.get_context().get_stage()
 layer = stage.GetRootLayer()
 
+imageable = UsdGeom.Imageable(stage.GetPrimAtPath("/World/warehouse_with_forklifts/SM_CardBoxC_01"))
+imageable.MakeInvisible()
+
 delete_box_copy()
 original_box_prim = stage.GetPrimAtPath("/World/warehouse_with_forklifts/SM_CardBoxC_01")
 if not original_box_prim.IsValid():
@@ -215,6 +218,7 @@ async def my_task():
 
     # Main Loop
     while True:
+        """ Move the camera """
         await asyncio.sleep(0.1)
         target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
         camOri = camPosOri(target_point, aimed_point)
@@ -223,7 +227,8 @@ async def my_task():
             orientation=camOri,  
         ) 
         await asyncio.sleep(0.1)
-        # Wait for the next frame to be ready
+        
+        """ Create boxes """
         print(f"Timeline is running: {timeline.is_playing()}")
         print(f"time: {timeline.get_current_time()}")
         for i in range(param_numBoxes):
@@ -239,6 +244,8 @@ async def my_task():
             new_box_prim.GetReferences().AddReference(assetPath="", primPath=original_box_prim.GetPath())
             if new_box_prim.IsValid():
                 # 获取现有变换操作
+                boxImgable = UsdGeom.Imageable(new_box_prim)
+                boxImgable.MakeVisible()
                 xform = UsdGeom.Xformable(new_box_prim)
                 xform.ClearXformOpOrder()
                 translate_op = xform.AddTranslateOp(opSuffix="")
@@ -293,7 +300,7 @@ async def my_task():
             camParam = [horizontal_aperture, vertical_aperture, focal_length]
         except ValueError:
             print(f"camParam with Frame_{param_iter}: False!")
-        await asyncio.sleep(0.1)
+        # await asyncio.sleep(0.1)
 
         """instanceSemantics"""
         try:
@@ -313,7 +320,7 @@ async def my_task():
                         mask_instanceSemantic[y_coords, x_coords] = i 
         except ValueError:
             print(f"instanceSemantics with Frame_{param_iter}: False!")
-        await asyncio.sleep(0.1)
+        # await asyncio.sleep(0.1)
 
         """objPose"""
         bounding_box_3d_data = bounding_box_3d_anno.get_data()
@@ -327,6 +334,7 @@ async def my_task():
                 index_id = prim_paths.index(box_prim_path)
                 bbox_dict = bounding_box_3d_dd[index_id]
                 center_world, size_world, euler_angle = bboxDict_to_transform(bbox_dict)
+                # print(f"center_world: {center_world}, size_world: {size_world}, euler_angle: {euler_angle}")
                 objPose[i, :] = np.concatenate((center_world, size_world, euler_angle))
             else:
                 print(f"In Frame_{param_iter} without box_{i}")
