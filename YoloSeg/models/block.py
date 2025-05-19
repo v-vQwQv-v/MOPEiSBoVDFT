@@ -268,4 +268,9 @@ class Proto(nn.Module):
 
     def forward(self, x):
         """Perform a forward pass through layers using an upsampled input image."""
-        return self.cv3(self.cv2(self.upsample(self.cv1(x))))
+        x1 = self.cv1(x)
+        x2 = self.upsample(x1)
+        x3 = self.cv2(x2)
+        x4 = self.cv3(x3)
+        return x4
+        # return self.cv3(self.cv2(self.upsample(self.cv1(x))))

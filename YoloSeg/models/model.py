@@ -8,6 +8,8 @@ from models.utils import fuse_conv_and_bn
 class yolov11(nn.Module):
     # no of classes
     nc = 80
+    nm = 32
+    npr = 256
     max_det = 300
 
     def __init__(self, model_size='nano'):
@@ -24,10 +26,12 @@ class yolov11(nn.Module):
         else:
             raise ValueError("The model size provided is not valid option")
 
-        # k 1 for n, | 2 for s, m, l, | 4 for x
-        # l 1 for n, s, | 2 for m, l, x
-        # m 0 for n, s, m, | 1 for l, x
-        # n 2 for m, 3 for n, s, l, x
+        """ 
+        k 1 for n, | 2 for s, m, l, | 4 for x
+        l 1 for n, s, | 2 for m, l, x
+        m 0 for n, s, m, | 1 for l, x
+        n 2 for m, 3 for n, s, l, x
+        """
         k, l, m, n = model_klm
 
         # backbone
@@ -49,8 +53,8 @@ class yolov11(nn.Module):
         self.l14 = nn.Upsample(None, 2, 'nearest')
         self.l15 = Concat(1) # l14, l4
         self.l16 = C3k2(128*k*2*l, 64*k*l, 1+m, l>1)
-        self.ls = Segment(nm=nm, npr=npr, ch=ch)
-
+        self.ls = Segment(nc= self.nc, nm = self.nm, npr= self.npr, ch=64 * k * l)
+       
         # self.l17 = Conv(64*k*l, 64*k*l, 3, 2)
         # self.l18 = Concat(1) # l17, l13
         # self.l19 = C3k2(192*k*l, 128*k*l, 1+m, l>1)
@@ -79,6 +83,7 @@ class yolov11(nn.Module):
         x = self.l14(x13)
         x = self.l15([x, x4])
         x16 = self.l16(x)
+        x = self.ls(x16)
         # x = self.l17(x16)
         # x = self.l18([x, x13])
         # x19 = self.l19(x)
@@ -86,7 +91,7 @@ class yolov11(nn.Module):
         # x = self.l21([x, x10])
         # x = self.l22(x)
         # x = self.l23([x16, x19, x])
-        return [x16]
+        return x
 
     def fuse(self):
         """
