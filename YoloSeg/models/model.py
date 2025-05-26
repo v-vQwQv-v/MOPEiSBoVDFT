@@ -2,7 +2,7 @@ from torch import nn
 
 from models.conv import Conv
 from models.block import Concat, C3k2, SPPF, C2PSA
-from models.head import Segment
+from models.head import Segment, Detect
 from models.utils import fuse_conv_and_bn
 
 class yolov11(nn.Module):
@@ -34,7 +34,7 @@ class yolov11(nn.Module):
         """
         k, l, m, n = model_klm
 
-        # backbone
+        """ Backbone """
         self.l0 = Conv(3, 16*k*l, 3, 2)
         self.l1 = Conv(16*k*l, 32*k*l, 3, 2)
         self.l2 = C3k2(32*k*l, 64*k*l, 1+m, l>1, 0.25)
@@ -46,52 +46,61 @@ class yolov11(nn.Module):
         self.l8 = C3k2(256*k, 256*k, 1+m, True)
         self.l9 = SPPF(256*k, 256*k, 5)
         self.l10 = C2PSA(256*k, 256*k, 1+m)
-        # YOLO11n Head
+
+        """ YOLO11n Head """
         self.l11 = nn.Upsample(None, 2, 'nearest')
         self.l12 = Concat(1) # l11, l6
         self.l13 = C3k2(256*k+128*k*l, 128*k*l, 1+m, l>1)
         self.l14 = nn.Upsample(None, 2, 'nearest')
         self.l15 = Concat(1) # l14, l4
         self.l16 = C3k2(128*k*2*l, 64*k*l, 1+m, l>1)
-        self.ls = Segment(nc= self.nc, nm = self.nm, npr= self.npr, ch=64 * k * l)
-       
-        # self.l17 = Conv(64*k*l, 64*k*l, 3, 2)
-        # self.l18 = Concat(1) # l17, l13
-        # self.l19 = C3k2(192*k*l, 128*k*l, 1+m, l>1)
-        # self.l20 = Conv(128*k*l, 128*k*l, 3, 2)
-        # self.l21 = Concat(1) # l20, l10
-        # self.l22 = C3k2(128*n*k*l, 256*k, 1+m, True)
-        # self.l23 = Detect(self.nc, [64*k*l, 128*k*l, 256*k]) # l16, l19, l22
+
+        """ Segment Head """
+        self.ls = Segment(nm = self.nm, npr= self.npr, ch=64 * k * l)
+
+        """ Detect Head """
+        self.l17 = Conv(64*k*l, 64*k*l, 3, 2)
+        self.l18 = Concat(1) # l17, l13
+        self.l19 = C3k2(192*k*l, 128*k*l, 1+m, l>1)
+        self.l20 = Conv(128*k*l, 128*k*l, 3, 2)
+        self.l21 = Concat(1) # l20, l10
+        self.l22 = C3k2(128*n*k*l, 256*k, 1+m, True)
+        self.l23 = Detect(self.nc, [64*k*l, 128*k*l, 256*k]) # l16, l19, l22
 
     def forward(self, x):
-        # backbone
-        x = self.l0(x)
-        x = self.l1(x)
-        x = self.l2(x)
-        x = self.l3(x)
-        x4 = self.l4(x)
-        x = self.l5(x4)
-        x6 = self.l6(x)
-        x = self.l7(x6)
-        x = self.l8(x)
-        x = self.l9(x)
-        x10 = self.l10(x)
-        # head
-        x = self.l11(x10)
-        x = self.l12([x, x6])
-        x13 = self.l13(x)
-        x = self.l14(x13)
-        x = self.l15([x, x4])
-        x16 = self.l16(x)
-        x = self.ls(x16)
-        # x = self.l17(x16)
-        # x = self.l18([x, x13])
-        # x19 = self.l19(x)
-        # x = self.l20(x19)
-        # x = self.l21([x, x10])
-        # x = self.l22(x)
-        # x = self.l23([x16, x19, x])
-        return x
+        """ Backbone """
+        x0 = self.l0(x)
+        x1 = self.l1(x0)
+        x2 = self.l2(x1)
+        x3= self.l3(x2)
+        x4 = self.l4(x3)
+        x5 = self.l5(x4)
+        x6 = self.l6(x5)
+        x7 = self.l7(x6)
+        x8 = self.l8(x7)
+        x9 = self.l9(x8)
+        x10 = self.l10(x9)
+
+        """ YOLO11n Head """
+        x11 = self.l11(x10)
+        x12 = self.l12([x11, x6])
+        x13 = self.l13(x12)
+        x14 = self.l14(x13)
+        x15 = self.l15([x14, x4])
+        x16 = self.l16(x15)
+
+        """ Segment Head """
+        xls = self.ls(x16)
+
+        """ Detect Head """
+        x17 = self.l17(x16)
+        x18 = self.l18([x17, x13])
+        x19 = self.l19(x18)
+        x20 = self.l20(x19)
+        x21 = self.l21([x20, x10])
+        x22 = self.l22(x21)
+        x23 = self.l23([x16, x19, x22])
+        return xls, x23
 
     def fuse(self):
         """

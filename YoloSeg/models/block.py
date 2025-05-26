@@ -273,4 +273,3 @@ class Proto(nn.Module):
         x3 = self.cv2(x2)
         x4 = self.cv3(x3)
         return x4
-        # return self.cv3(self.cv2(self.upsample(self.cv1(x))))
