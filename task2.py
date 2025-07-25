@@ -1,6 +1,8 @@
-# task2: the creation of boxes is same as task1, but the camera will be moved to a random postion, where the viewpoint is the center of the scence. 
-# After a few seconds, the scene will be photographed and saved to files. Files include RGB as png-pictures and depth as csv-file.
-# As the same time, the labels of scence will also be saved as a json-file. The label include the Pose(position(xyz) and rotation(roll pitch yaw)) and instance semantics of the boxes.
+"""
+task2: the creation of boxes is same as task1, but the camera will be moved to a random postion, where the viewpoint is the center of the scence. 
+After a few seconds, the scene will be photographed and saved to files. Files include RGB as png-pictures and depth as csv-file.
+As the same time, the labels of scence will also be saved as a json-file. The label include the Pose(position(xyz) and rotation(roll pitch yaw)) and instance semantics of the boxes.
+"""
 
 import omni.timeline
 import asyncio

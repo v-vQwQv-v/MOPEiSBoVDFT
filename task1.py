@@ -1,5 +1,7 @@
-# task1: In this task, we will create a box and set its position and rotation randomly. The box will be created every 5 seconds, and the previous box will be deleted.
-# After the box is created, the stage will be fotographed and saved to files. Files include RGBA.  
+"""
+task1: In this task, we will create a box and set its position and rotation randomly. The box will be created every 5 seconds, and the previous box will be deleted.
+After the box is created, the stage will be fotographed and saved to files. Files include RGBA.  
+"""
 
 import omni.timeline
 import asyncio
