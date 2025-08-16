@@ -22,10 +22,7 @@ mtxTrans_vitual2Sim_rdLarge = transScale* np.array([[1,     0,  0, -rdLargeSpace
 yaw_0 = 90
 
 boxes1Sizes = [[0.26, 0.35, 0.16], [0.52, 0.52, 0.26], [0.52, 0.73, 0.52]] # 三种箱子的尺寸
-box1Quantities = [30, 20, 10] # 每种箱子的数量
-box2Quantities = [20, 10, 5]  # 每种箱子的数量
 alpha = 2.0  # 权重分配：大箱子权重高
-
 
 def pack_boxes_weighted_random(spaceSize, listBoxTypeSize, listBoxQuantity, 
                                support_threshold=0.5, alpha=2.0, max_fail=50,
@@ -257,104 +254,157 @@ stage.SetEditTarget(stage.GetRootLayer())
 flat = UsdUtils.FlattenLayerStack(stage)
 layer = stage.GetRootLayer()
 
-"""BoxHeapsCreation"""
+"""Scene Planning"""
+rdLargeLWRQ = [2.0, 4.0, 1, random.randint(1, 6)]
+pwbhLWRQ = [2.0, 2.0, 0, random.randint(1, 6)]
+forkLiftLWRQ = [2.0, 4.0, 0, random.randint(0, 2)]
+damperLWRQ = [4.0, 1.5, 0, random.randint(0, 2)]
+
+sceneSize = [20.0, 24.0]
+createSceneTool = RectangleArranger2D(sceneSize)
+sceneDescriptors = np.array(createSceneTool.arrange_rects_2d_with_qty([rdLargeLWRQ, pwbhLWRQ, forkLiftLWRQ, damperLWRQ], max_trials_per_rect=2000))
+listRdLargeDescriptors = sceneDescriptors[sceneDescriptors[:, 0] == 0]
+listPwbhDescriptors = sceneDescriptors[sceneDescriptors[:, 0] == 1]
+listForkLiftDescriptors = sceneDescriptors[sceneDescriptors[:, 0] == 2]
+listDumperDescriptors = sceneDescriptors[sceneDescriptors[:, 0] == 3]
+print(f"Scene includes {len(sceneDescriptors)} objects: {len(listRdLargeDescriptors)} rdLarge(s), {len(listPwbhDescriptors)} pwbh(s), {len(listForkLiftDescriptors)} forkLift(s), {len(listDumperDescriptors)} dumper(s)")
+
+"""rdLarge Planning"""
+print(f"Planning {len(listRdLargeDescriptors)} rdLarge(s) with descriptors: {listRdLargeDescriptors}")
 originalRdLargePath = Sdf.Path("/World/RackLarge_A1")
 originalRdLargePrim = stage.GetPrimAtPath(str(originalRdLargePath))
-if not originalRdLargePrim.IsActive():
-        print(f"{originalRdLargePath} deactivated, activating...")
-        originalRdLargePrim.SetActive(True)
-
 listOriginalBox1Path = [
     "/World/RackLarge_A1/Cardbox_D2/Cardbox_D2",
     "/World/RackLarge_A1/Cardbox_C3/Cardbox_C3",
     "/World/RackLarge_A1/Cardbox_A3/Cardbox_A3"
 ]
-box1PosDescriptors = pack_boxes_weighted_random(
-    rdLargeSpace, boxes1Sizes, box1Quantities, 
-    support_threshold=support_threshold, 
-    alpha=alpha,
-    max_fail=50,
-    w_x=1, w_y=1, w_z=0.5, rdYaws=True
-)
-box1PosDescriptors_center = boxCorner2boxCenter(box1PosDescriptors, boxes1Sizes)
-listOriginalBox1Prim = []
-for path in listOriginalBox1Path:
-    prim = stage.GetPrimAtPath(path)
-    if not prim.IsValid():
-        raise RuntimeError(f"Prim at path '{path}' is invalid or does not exist.")
-    listOriginalBox1Prim.append(prim)
-    imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
-    imageable.MakeInvisible()
-listCreatedBox1Prim = []
-for i, bPDc in enumerate(box1PosDescriptors_center):
-    seq, x, y, z, yaw = bPDc
-    x_w, y_w, z_w, _ = mtxTrans_vitual2Sim_rdLarge @ np.append([x, y, z], 1)
-    OriginalBoxPrim = listOriginalBox1Prim[seq]
-    newBox1Path = f"/World/RackLarge_A1/Box_{seq}_{i}"
-    newBox1Prim = stage.OverridePrim(newBox1Path)
-    newBox1Prim.GetReferences().AddReference(assetPath="", primPath=OriginalBoxPrim.GetPath())
-    if newBox1Prim.IsValid():
-        box1Imgable = UsdGeom.Imageable(newBox1Prim)
-        box1Imgable.MakeVisible()
-        box1Xform = UsdGeom.Xformable(newBox1Prim)
-        box1Xform.ClearXformOpOrder()
-        box1Xform_translate_op = box1Xform.AddTranslateOp(opSuffix="")
-        box1Xform_rotate_op = box1Xform.AddRotateXYZOp(opSuffix="")
-        box1Xform_translate_op.Set(Gf.Vec3d(x_w, y_w, z_w))
-        box1Xform_rotate_op.Set(Gf.Vec3f(0, 0, yaw_0 + yaw))
-        print(f"Placed box_{seq}_{i} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
-        listCreatedBox1Prim.append(newBox1Prim)
+if not originalRdLargePrim.IsActive():
+    print(f"{originalRdLargePath} deactivated, activating...")
+    originalRdLargePrim.SetActive(True)
+listCreatedRdLargePrim = []
+for i, rdLargeDes in enumerate(listRdLargeDescriptors):
+    _, px, py, pyaw = rdLargeDes
+    px = transScale * px
+    py = transScale * py
+    box1Quantities = [random.randint(0, 30), random.randint(0, 20), random.randint(0, 10)] # 每种箱子的数量
+    """BoxHeapsCreation"""
+    box1PosDescriptors = pack_boxes_weighted_random(
+        rdLargeSpace, boxes1Sizes, box1Quantities, 
+        support_threshold=support_threshold, 
+        alpha=alpha,
+        max_fail=50,
+        w_x=1, w_y=1, w_z=0.5, rdYaws=True
+    )
+    box1PosDescriptors_center = boxCorner2boxCenter(box1PosDescriptors, boxes1Sizes)
+    listOriginalBox1Prim = []
+    for path in listOriginalBox1Path:
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            raise RuntimeError(f"Prim at path '{path}' is invalid or does not exist.")
+        listOriginalBox1Prim.append(prim)
+        imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
+        imageable.MakeInvisible()
+    listCreatedBox1Prim = []
+    for j, bPDc in enumerate(box1PosDescriptors_center):
+        seq, x, y, z, yaw = bPDc
+        x_w, y_w, z_w, _ = mtxTrans_vitual2Sim_rdLarge @ np.append([x, y, z], 1)
+        OriginalBoxPrim = listOriginalBox1Prim[seq]
+        newBox1Path = f"/World/RackLarge_A1/Box_{seq}_{j}"
+        newBox1Prim = stage.OverridePrim(newBox1Path)
+        newBox1Prim.GetReferences().AddReference(assetPath="", primPath=OriginalBoxPrim.GetPath())
+        if newBox1Prim.IsValid():
+            box1Imgable = UsdGeom.Imageable(newBox1Prim)
+            box1Imgable.MakeVisible()
+            box1Xform = UsdGeom.Xformable(newBox1Prim)
+            box1Xform.ClearXformOpOrder()
+            box1Xform_translate_op = box1Xform.AddTranslateOp(opSuffix="")
+            box1Xform_rotate_op = box1Xform.AddRotateXYZOp(opSuffix="")
+            box1Xform_translate_op.Set(Gf.Vec3d(x_w, y_w, z_w))
+            box1Xform_rotate_op.Set(Gf.Vec3f(0, 0, yaw_0 + yaw))
+            print(f"Placed box_{seq}_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+            listCreatedBox1Prim.append(newBox1Prim)
 
-"""BlueBoxesCreation"""
-originalBlueBoxPath = "/World/RackLarge_A1/Container_B09_40x30x22cm_PR_V_NVD_01"
-originalBlueBoxPrim = stage.GetPrimAtPath(originalBlueBoxPath)
-if not originalBlueBoxPrim.IsValid():
-    raise RuntimeError(f"Prim at path '/World/RackLarge_A1/Container_B09_40x30x22cm_PR_V_NVD_01' is invalid or does not exist.")
-else:
-    imageable = UsdGeom.Imageable(originalBlueBoxPrim)
-    imageable.MakeInvisible()
-    # imageable.MakeVisible()
-blueBoxParam = [[40, 30, 0, random.randint(1, 10)]]  # [L, W, restrict, qty]
-createBlueBoxTool = RectangleArranger2D(transScale*np.array(rdLargeSpace[:2]))
-blueBoxPosDescriptors = createBlueBoxTool.arrange_rects_2d_with_qty(blueBoxParam, max_trials_per_rect=2000) # [seq, cx, cy, yaw_deg]*N
-listCreatedBlueBoxPrim = []
-if len(blueBoxPosDescriptors) != 0:
-    for i, bBPDc in enumerate(blueBoxPosDescriptors):
-        _, x_w, y_w, yaw = bBPDc
-        z_w = transScale * rdLargeHeight_2
-        newBlueBoxPath = f"/World/RackLarge_A1/BlueBox_{i}"
-        newBlueBoxPrim = stage.OverridePrim(newBlueBoxPath)
-        newBlueBoxPrim.GetReferences().AddReference(assetPath="", primPath=originalBlueBoxPath)
-        if newBlueBoxPrim.IsValid():
-            blueboxImgable = UsdGeom.Imageable(newBlueBoxPrim)
-            blueboxImgable.MakeVisible()
-            blueboxXform = UsdGeom.Xformable(newBlueBoxPrim)
-            blueboxXform.ClearXformOpOrder()
-            blueboxXform_translate_op = blueboxXform.AddTranslateOp(opSuffix="")
-            blueboxXform_rotate_op = blueboxXform.AddRotateXYZOp(opSuffix="")
-            blueboxXform_translate_op.Set(Gf.Vec3d(x_w, y_w, z_w))
-            blueboxXform_rotate_op.Set(Gf.Vec3f(0, 0, yaw))
-            print(f"Placed blueBox_{i} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
-            listCreatedBlueBoxPrim.append(newBlueBoxPrim)
+    """BlueBoxesCreation"""
+    originalBlueBoxPath = "/World/RackLarge_A1/Container_B09_40x30x22cm_PR_V_NVD_01"
+    originalBlueBoxPrim = stage.GetPrimAtPath(originalBlueBoxPath)
+    if not originalBlueBoxPrim.IsValid():
+        raise RuntimeError(f"Prim at path '/World/RackLarge_A1/Container_B09_40x30x22cm_PR_V_NVD_01' is invalid or does not exist.")
+    else:
+        imageable = UsdGeom.Imageable(originalBlueBoxPrim)
+        imageable.MakeInvisible()
+        # imageable.MakeVisible()
+    blueBoxParam = [[40, 30, 0, random.randint(1, 10)]]  # [L, W, restrict, qty]
+    createBlueBoxTool = RectangleArranger2D(transScale*np.array(rdLargeSpace[:2]))
+    blueBoxPosDescriptors = createBlueBoxTool.arrange_rects_2d_with_qty(blueBoxParam, max_trials_per_rect=2000) # [seq, cx, cy, yaw_deg]*N
+    listCreatedBlueBoxPrim = []
+    if len(blueBoxPosDescriptors) != 0:
+        for j, bBPDc in enumerate(blueBoxPosDescriptors):
+            _, x_w, y_w, yaw = bBPDc
+            z_w = transScale * rdLargeHeight_2
+            newBlueBoxPath = f"/World/RackLarge_A1/BlueBox_{j}"
+            newBlueBoxPrim = stage.OverridePrim(newBlueBoxPath)
+            newBlueBoxPrim.GetReferences().AddReference(assetPath="", primPath=originalBlueBoxPath)
+            if newBlueBoxPrim.IsValid():
+                blueboxImgable = UsdGeom.Imageable(newBlueBoxPrim)
+                blueboxImgable.MakeVisible()
+                blueboxXform = UsdGeom.Xformable(newBlueBoxPrim)
+                blueboxXform.ClearXformOpOrder()
+                blueboxXform_translate_op = blueboxXform.AddTranslateOp(opSuffix="")
+                blueboxXform_rotate_op = blueboxXform.AddRotateXYZOp(opSuffix="")
+                blueboxXform_translate_op.Set(Gf.Vec3d(x_w, y_w, z_w))
+                blueboxXform_rotate_op.Set(Gf.Vec3f(0, 0, yaw))
+                print(f"Placed blueBox_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+                listCreatedBlueBoxPrim.append(newBlueBoxPrim)
 
-"""Copy RdLarge"""
-newRdLargePath = Sdf.Path("/World/RackLarge_A1_Copy")
-if stage.GetPrimAtPath(str(newRdLargePath)).IsValid():
-    stage.RemovePrim(newRdLargePath)
-cmds.execute("CopyPrim", path_from=originalRdLargePath, path_to=newRdLargePath)
-newRdLargePrim = stage.GetPrimAtPath(str(newRdLargePath))
-rdLargeXform = UsdGeom.Xformable(newRdLargePrim)
-rdLargeXform.ClearXformOpOrder()
-rdLargeXform_scale_op = rdLargeXform.AddScaleOp(opSuffix="")
-rdLargeXform_translate_op = rdLargeXform.AddTranslateOp(opSuffix="")
-rdLargeXform_rotate_op = rdLargeXform.AddRotateXYZOp(opSuffix="")
-rdLargeXform_scale_op.Set(Gf.Vec3d(0.01, 0.01, 0.01))
-rdLargeXform_translate_op.Set(Gf.Vec3d(100, 200, 0))
-rdLargeXform_rotate_op.Set(Gf.Vec3f(0, 0, 30))
+    """Copy RdLarge"""
+    newRdLargePath = Sdf.Path(f"/World/RackLarge_A1_Copy_{i}")
+    if stage.GetPrimAtPath(str(newRdLargePath)).IsValid():
+        stage.RemovePrim(newRdLargePath)
+    cmds.execute("CopyPrim", path_from=originalRdLargePath, path_to=newRdLargePath)
+    newRdLargePrim = stage.GetPrimAtPath(str(newRdLargePath))
+    rdLargeXform = UsdGeom.Xformable(newRdLargePrim)
+    rdLargeXform.ClearXformOpOrder()
+    rdLargeXform_scale_op = rdLargeXform.AddScaleOp(opSuffix="")
+    rdLargeXform_translate_op = rdLargeXform.AddTranslateOp(opSuffix="")
+    rdLargeXform_rotate_op = rdLargeXform.AddRotateXYZOp(opSuffix="")
+    rdLargeXform_scale_op.Set(Gf.Vec3d(0.01, 0.01, 0.01))
+    rdLargeXform_translate_op.Set(Gf.Vec3d(px, py, 0))
+    rdLargeXform_rotate_op.Set(Gf.Vec3f(0, 0, pyaw))
+    listCreatedRdLargePrim.append(newRdLargePrim)
 
-"""repeat k times"""
+    """reset original rdLarge"""
+    for box in listCreatedBox1Prim:
+        if box.IsValid():
+            box.GetStage().RemovePrim(box.GetPath())
+            print(f"Deleted created box at {box.GetPath()}")
+    for box in listCreatedBlueBoxPrim:
+        if box.IsValid():
+            box.GetStage().RemovePrim(box.GetPath())
+            print(f"Deleted created blue box at {box.GetPath()}")
+    for path in listOriginalBox1Path:
+        prim = stage.GetPrimAtPath(path)
+        if prim.IsValid():
+            imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
+            imageable.MakeVisible()
+            print(f"Made original box at {path} visible.")
+    if originalBlueBoxPrim.IsValid():
+        imageable = UsdGeom.Imageable(originalBlueBoxPrim)
+        imageable.MakeVisible()
+        print(f"Made original blue box at {originalBlueBoxPrim.GetPath()} visible.")
 
-"""PwbhesCreation"""
+"""Set original rdLarge deactivated"""
+if originalRdLargePrim.IsActive():
+    originalRdLargePrim.SetActive(False)
+    print(f"Made original rdLarge at {originalRdLargePrim.GetPath()} deactivated.")
+
+
+"""pwbh Planning"""
+print(f"Planning {len(listPwbhDescriptors)} original box(es) with paths: {listPwbhDescriptors}")
+originalPwbhPath = Sdf.Path("/World/WarehousePile_A6")
+originalPwbhPrim = stage.GetPrimAtPath(str(originalPwbhPath))
+if not originalPwbhPrim.IsActive():
+    print(f"{originalPwbhPath} deactivated, activating...")
+    originalPwbhPrim.SetActive(True)
 listOriginalBox2Path = [
     "/World/WarehousePile_A6/Cardbox_D2",
     "/World/WarehousePile_A6/Cardbox_C1",
@@ -366,78 +416,196 @@ mtxTrans_vitual2Sim_pwbh = transScale * np.array([[1, 0, 0, -pwbhSpace[0]/2 + to
                                                   [0, 1, 0, -pwbhSpace[1]/2 + tolerance],
                                                   [0, 0, 1, pwbhHeight],
                                                   [0, 0, 0, 1]])
-box2PosDescriptors = pack_boxes_weighted_random(
-    pwbhSpace, boxes1Sizes, box2Quantities, 
-    support_threshold=support_threshold, 
-    alpha=alpha,
-    max_fail=50,
+listCreatedPwbhPrim = []
+for i, pwbhDesc in enumerate(listPwbhDescriptors):
+    _, px, py, pyaw = pwbhDesc
+    px = transScale * px
+    py = transScale * py
+    box2Quantities = [random.randint(0, 20), random.randint(0, 10), random.randint(0, 5)]  # 每种箱子的数量
+    """PwbhesCreation"""
+    box2PosDescriptors = pack_boxes_weighted_random(
+        pwbhSpace, boxes1Sizes, box2Quantities,
+        support_threshold=support_threshold,
+        alpha=alpha,
+        max_fail=50,
     w_x=1, w_y=1, w_z=0.5, rdYaws=True
-)
-box2PosDescriptors_center = boxCorner2boxCenter(box2PosDescriptors, boxes1Sizes)
-listOriginalBox2Prim = []
-for path in listOriginalBox2Path:
-    prim = stage.GetPrimAtPath(path)
-    if not prim.IsValid():
-        raise RuntimeError(f"Prim at path '{path}' is invalid or does not exist.")
-    listOriginalBox2Prim.append(prim)
-    imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
-    imageable.MakeInvisible()
-listCreatedBox2Prim = []
-for i, bPDc in enumerate(box2PosDescriptors_center):
-    seq, x, y, z, yaw = bPDc
-    x_w, y_w, z_w, _ = mtxTrans_vitual2Sim_pwbh @ np.append([x, y, z], 1)
-    OriginalBoxPrim = listOriginalBox2Prim[seq]
-    newBox2Path = f"/World/WarehousePile_A6/Box_{seq}_{i}"
-    newBox2Prim = stage.OverridePrim(newBox2Path)
-    newBox2Prim.GetReferences().AddReference(assetPath="", primPath=OriginalBoxPrim.GetPath())
-    if newBox2Prim.IsValid():
-        box2Imgable = UsdGeom.Imageable(newBox2Prim)
-        box2Imgable.MakeVisible()
-        box2Xform = UsdGeom.Xformable(newBox2Prim)
-        box2Xform.ClearXformOpOrder()
-        box2Xform_translate_op = box2Xform.AddTranslateOp(opSuffix="")
-        box2Xform_rotate_op = box2Xform.AddRotateXYZOp(opSuffix="")
-        box2Xform_translate_op.Set(Gf.Vec3d(x_w, y_w, z_w))
-        box2Xform_rotate_op.Set(Gf.Vec3f(0, 0, yaw_0 + yaw))
-        print(f"Placed box_{seq}_{i} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
-        listCreatedBox2Prim.append(newBox2Prim)
-
-"""repeat k times"""
-
-"""DumpersCreation: use the same copy-method like rdLarge"""
-
-"""ForksLiftCreation: use the same copy-method like rdLarge"""
-
-"""Delete created boxes"""
-for box in listCreatedBox1Prim:
-    if box.IsValid():
-        box.GetStage().RemovePrim(box.GetPath())
-        print(f"Deleted created box at {box.GetPath()}")
-for box in listCreatedBlueBoxPrim:
-    if box.IsValid():
-        box.GetStage().RemovePrim(box.GetPath())
-        print(f"Deleted created blue box at {box.GetPath()}")
-for box in listCreatedBox2Prim:
-    if box.IsValid():
-        box.GetStage().RemovePrim(box.GetPath())
-        print(f"Deleted created box at {box.GetPath()}")
-for path in listOriginalBox1Path:
-    prim = stage.GetPrimAtPath(path)
-    if prim.IsValid():
+    )
+    box2PosDescriptors_center = boxCorner2boxCenter(box2PosDescriptors, boxes1Sizes)
+    listOriginalBox2Prim = []
+    for path in listOriginalBox2Path:
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            raise RuntimeError(f"Prim at path '{path}' is invalid or does not exist.")
+        listOriginalBox2Prim.append(prim)
         imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
-        imageable.MakeVisible()
-        print(f"Made original box at {path} visible.")
-for path in listOriginalBox2Path:
-    prim = stage.GetPrimAtPath(path)
-    if prim.IsValid():
-        imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
-        imageable.MakeVisible()
-        print(f"Made original box at {path} visible.")
-if originalBlueBoxPrim.IsValid():
-    imageable = UsdGeom.Imageable(originalBlueBoxPrim)
-    imageable.MakeVisible()
-    print(f"Made original blue box at {originalBlueBoxPrim.GetPath()} visible.")
+        imageable.MakeInvisible()
+    listCreatedBox2Prim = []
+    for j, bPDc in enumerate(box2PosDescriptors_center):
+        seq, x, y, z, yaw = bPDc
+        x_w, y_w, z_w, _ = mtxTrans_vitual2Sim_pwbh @ np.append([x, y, z], 1)
+        OriginalBoxPrim = listOriginalBox2Prim[seq]
+        newBox2Path = f"/World/WarehousePile_A6/Box_{seq}_{j}"
+        newBox2Prim = stage.OverridePrim(newBox2Path)
+        newBox2Prim.GetReferences().AddReference(assetPath="", primPath=OriginalBoxPrim.GetPath())
+        if newBox2Prim.IsValid():
+            box2Imgable = UsdGeom.Imageable(newBox2Prim)
+            box2Imgable.MakeVisible()
+            box2Xform = UsdGeom.Xformable(newBox2Prim)
+            box2Xform.ClearXformOpOrder()
+            box2Xform_translate_op = box2Xform.AddTranslateOp(opSuffix="")
+            box2Xform_rotate_op = box2Xform.AddRotateXYZOp(opSuffix="")
+            box2Xform_translate_op.Set(Gf.Vec3d(x_w, y_w, z_w))
+            box2Xform_rotate_op.Set(Gf.Vec3f(0, 0, yaw_0 + yaw))
+            print(f"Placed box_{seq}_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+            listCreatedBox2Prim.append(newBox2Prim)
+    
+    """Copy Pwbhs"""
+    newPwbhPath = Sdf.Path(f"/World/WarehousePile_A6_Copy_{i}")
+    if stage.GetPrimAtPath(str(newPwbhPath)).IsValid():
+        stage.RemovePrim(newPwbhPath)
+    cmds.execute("CopyPrim", path_from=originalPwbhPath, path_to=newPwbhPath)
+    newPwbhPrim = stage.GetPrimAtPath(str(newPwbhPath))
+    PwbhXform = UsdGeom.Xformable(newPwbhPrim)
+    PwbhXform.ClearXformOpOrder()
+    PwbhXform_scale_op = PwbhXform.AddScaleOp(opSuffix="")
+    PwbhXform_translate_op = PwbhXform.AddTranslateOp(opSuffix="")
+    PwbhXform_rotate_op = PwbhXform.AddRotateXYZOp(opSuffix="")
+    PwbhXform_scale_op.Set(Gf.Vec3d(0.01, 0.01, 0.01))
+    PwbhXform_translate_op.Set(Gf.Vec3d(px, py, 0))
+    PwbhXform_rotate_op.Set(Gf.Vec3f(0, 0, pyaw))
+    listCreatedPwbhPrim.append(newPwbhPrim)
+
+    """reset original Pwbhs"""
+    for box in listCreatedBox2Prim:
+        if box.IsValid():
+            box.GetStage().RemovePrim(box.GetPath())
+            print(f"Deleted created box at {box.GetPath()}")
+    for path in listOriginalBox2Path:
+        prim = stage.GetPrimAtPath(path)
+        if prim.IsValid():
+            imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
+            imageable.MakeVisible()
+            print(f"Made original box at {path} visible.")
+
+"""Set original Pwbhs deactivated"""
+if originalPwbhPrim.IsActive():
+    originalPwbhPrim.SetActive(False)
+    print(f"Made original Pwbh at {originalPwbhPrim.GetPath()} deactivated.")
+
+"""Dumper Planning"""
+print(f"Planning {len(listDumperDescriptors)} dumper(s) with descriptors: {listDumperDescriptors}")
+originalDumperPath = Sdf.Path("/World/_9684481")
+originalDumperPrim = stage.GetPrimAtPath(str(originalDumperPath))
+dumperOffsetXYZ = [-0.8, 0, 0.45]
+if not originalDumperPrim.IsActive():
+    print(f"{originalDumperPath} deactivated, activating...")
+    originalDumperPrim.SetActive(True)
+listCreatedDumperPrim = []
+for i, dumperDesc in enumerate(listDumperDescriptors):
+    _, px, py, pyaw = dumperDesc
+    px = 10* transScale * (px + dumperOffsetXYZ[0])
+    py = 10* transScale * (py + dumperOffsetXYZ[1])
+    pz = 10* transScale * dumperOffsetXYZ[2]
+
+    """Copy Dumper"""
+    newDumperPath = Sdf.Path(f"/World/Dumper_Copy_{i}")
+    if stage.GetPrimAtPath(str(newDumperPath)).IsValid():
+        stage.RemovePrim(newDumperPath)
+    cmds.execute("CopyPrim", path_from=originalDumperPath, path_to=newDumperPath)
+    newDumperPrim = stage.GetPrimAtPath(str(newDumperPath))
+    DumperXform = UsdGeom.Xformable(newDumperPrim)
+    DumperXform.ClearXformOpOrder()
+    DumperXform_scale_op = DumperXform.AddScaleOp(opSuffix="")
+    DumperXform_translate_op = DumperXform.AddTranslateOp(opSuffix="")
+    DumperXform_rotate_op = DumperXform.AddRotateXYZOp(opSuffix="")
+    DumperXform_scale_op.Set(Gf.Vec3d(0.001, 0.001, 0.001))
+    DumperXform_translate_op.Set(Gf.Vec3d(px, py, pz))
+    DumperXform_rotate_op.Set(Gf.Vec3f(0, 0, pyaw))
+    listCreatedDumperPrim.append(newDumperPrim)
+
+"""Set original Dumper deactivated"""
+if originalDumperPrim.IsActive():
+    originalDumperPrim.SetActive(False)
+    print(f"Made original Dumper at {originalDumperPrim.GetPath()} deactivated.")
+
+"""ForkLift Planning"""
+print(f"Planning {len(listForkLiftDescriptors)} ForkLift(s) with descriptors: {listForkLiftDescriptors}")
+originalForkLiftPath = Sdf.Path("/World/warehouse_with_forklifts/Forklift")
+originalForkLiftPrim = stage.GetPrimAtPath(str(originalForkLiftPath))
+if not originalForkLiftPrim.IsActive():
+    print(f"{originalForkLiftPath} deactivated, activating...")
+    originalForkLiftPrim.SetActive(True)
+listCreatedForkLiftPrim = []
+for i, forkLiftDesc in enumerate(listForkLiftDescriptors):
+    _, px, py, pyaw = forkLiftDesc
+
+    """Copy ForkLift"""
+    newForkLiftPath = Sdf.Path(f"/World/warehouse_with_forklifts/ForkLift_Copy_{i}")
+    if stage.GetPrimAtPath(str(newForkLiftPath)).IsValid():
+        stage.RemovePrim(newForkLiftPath)
+    cmds.execute("CopyPrim", path_from=originalForkLiftPath, path_to=newForkLiftPath)
+    newForkLiftPrim = stage.GetPrimAtPath(str(newForkLiftPath))
+    ForkLiftXform = UsdGeom.Xformable(newForkLiftPrim)
+    ForkLiftXform.ClearXformOpOrder()
+    ForkLiftXform_scale_op = ForkLiftXform.AddScaleOp(opSuffix="")
+    ForkLiftXform_translate_op = ForkLiftXform.AddTranslateOp(opSuffix="")
+    ForkLiftXform_rotate_op = ForkLiftXform.AddRotateXYZOp(opSuffix="")
+    ForkLiftXform_scale_op.Set(Gf.Vec3d(1, 1, 1))
+    ForkLiftXform_translate_op.Set(Gf.Vec3d(px, py, 0))
+    ForkLiftXform_rotate_op.Set(Gf.Vec3f(0, 0, pyaw))
+    listCreatedForkLiftPrim.append(newForkLiftPrim)
+
+"""Set original ForkLift deactivated"""
+if originalForkLiftPrim.IsActive():
+    originalForkLiftPrim.SetActive(False)
+    print(f"Made original ForkLift at {originalForkLiftPrim.GetPath()} deactivated.")
+
+print(f"Scene includes {len(sceneDescriptors)} objects: {len(listRdLargeDescriptors)} rdLarge(s), {len(listPwbhDescriptors)} pwbh(s), {len(listForkLiftDescriptors)} forkLift(s), {len(listDumperDescriptors)} dumper(s)")
 
 
+# """Delete created boxes"""
+# for box in listCreatedBox1Prim:
+#     if box.IsValid():
+#         box.GetStage().RemovePrim(box.GetPath())
+#         print(f"Deleted created box at {box.GetPath()}")
+# for box in listCreatedBlueBoxPrim:
+#     if box.IsValid():
+#         box.GetStage().RemovePrim(box.GetPath())
+#         print(f"Deleted created blue box at {box.GetPath()}")
+# for box in listCreatedBox2Prim:
+#     if box.IsValid():
+#         box.GetStage().RemovePrim(box.GetPath())
+#         print(f"Deleted created box at {box.GetPath()}")
+# for path in listOriginalBox1Path:
+#     prim = stage.GetPrimAtPath(path)
+#     if prim.IsValid():
+#         imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
+#         imageable.MakeVisible()
+#         print(f"Made original box at {path} visible.")
+# for path in listOriginalBox2Path:
+#     prim = stage.GetPrimAtPath(path)
+#     if prim.IsValid():
+#         imageable = UsdGeom.Imageable(stage.GetPrimAtPath(path))
+#         imageable.MakeVisible()
+#         print(f"Made original box at {path} visible.")
+# if originalBlueBoxPrim.IsValid():
+#     imageable = UsdGeom.Imageable(originalBlueBoxPrim)
+#     imageable.MakeVisible()
+#     print(f"Made original blue box at {originalBlueBoxPrim.GetPath()} visible.")
 
-
+for path in listCreatedDumperPrim:
+    if path.IsValid():
+        path.GetStage().RemovePrim(path.GetPath())
+        print(f"Deleted created dumper at {path.GetPath()}")
+for path in listCreatedForkLiftPrim:
+    if path.IsValid():
+        path.GetStage().RemovePrim(path.GetPath())
+        print(f"Deleted created forklift at {path.GetPath()}")
+for path in listCreatedRdLargePrim:
+    if path.IsValid():
+        path.GetStage().RemovePrim(path.GetPath())
+        print(f"Deleted created rdLarge at {path.GetPath()}")
+for path in listCreatedPwbhPrim:
+    if path.IsValid():
+        path.GetStage().RemovePrim(path.GetPath())
+        print(f"Deleted created pwbh at {path.GetPath()}")
