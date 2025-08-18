@@ -14,7 +14,7 @@ import asyncio
 import omni.usd as usd
 import random
 import pxr.Gf as Gf
-from pxr import Usd, UsdGeom
+from pxr import Usd, UsdGeom, Sdf
 from isaacsim.sensors.camera import Camera
 from omni.replicator.core import AnnotatorRegistry
 import cv2
@@ -38,6 +38,9 @@ aParam_max_rdLarge = 6
 aParam_max_pwbh = 6
 aParam_max_forklift = 2
 aParam_max_dumper = 2
+aParam_max_rdLarge_smBox = [30, 20, 10]
+aParam_max_pwbh_smBox = [20, 10, 5]
+aParam_max_rdLarge_container = 10
 aParam_distriBoxWeightAlpha = 2.0 # Distribution of box weights
 
 """0.1.2 Time Parameters"""
@@ -51,6 +54,7 @@ aParam_imgWidth = 1024
 aParam_imgHeight = 512
 
 """0.2 Unadjustable Parameters"""
+uPath_camera = "/World/Camera_0"
 """0.2.1 Scene Parameters"""
 uParam_transScale = 100.0 # Translation scale for objects in cm to meters
 uParam_smBoxSizeList = [[0.26, 0.35, 0.16], [0.52, 0.52, 0.26], [0.52, 0.73, 0.52]] # small, medium, large, used for rdLarges and pwbhs
@@ -73,6 +77,7 @@ uPath_rdLarge_smBoxList_original = [
     "/World/RackLarge_A1/Cardbox_C3/Cardbox_C3",
     "/World/RackLarge_A1/Cardbox_A3/Cardbox_A3"
 ]
+uPath_rdLarge_container = "/World/RackLarge_A1/Container_B09_40x30x22cm_PR_V_NVD_01"
 
 """0.2.3 Pallet"""
 uParam_pwbh_Space = [1.70, 1.90, 1.80] # Space of Pallet [L, W, H]
@@ -82,14 +87,20 @@ uParam_pwbh_mtxTrans = uParam_transScale * np.array([[1, 0,  0, -uParam_pwbh_Spa
                                                      [0, 0,  1, uParam_pwbh_Height],
                                                      [0, 0,  0, 1]], dtype=np.float32)
 uParam_pwbh_yaw0 = 0
-
+uPath_pwbh = "/World/WarehousePile_A6"
+uPath_pwbh_smBoxList_original = [
+    "/World/WarehousePile_A6/Cardbox_D2",
+    "/World/WarehousePile_A6/Cardbox_C1",
+    "/World/WarehousePile_A6/Cardbox_A3"
+]
 """0.2.4 Forklift"""
-0
+uPath_forklift = "/World/warehouse_with_forklifts/Forklift"
 
 """0.2.5 Dumper"""
 uParam_dumper_offsetXYZ = [-0.8, 0, 0.45]
 uParam_dumper_transScale = 1000.0
 uParam_dumper_transScale_T = 1/uParam_dumper_transScale
+uPath_dumper = "/World/_9684481"
 
 """1. Functions"""
 def bboxDict_to_transform(bbox_dict):
@@ -492,3 +503,158 @@ layer = stage.GetRootLayer()
 deleteCopy(stage)
 
 """2.2.2 Check Scene"""
+prim_rdLarge = stage.GetPrimAtPath(uPath_rdLarge)
+assert prim_rdLarge.IsValid(), \
+    f"RackLarge prim not found at {uPath_rdLarge}"
+primList_rdLarge_smBox_original = [stage.GetPrimAtPath(path) for path in uPath_rdLarge_smBoxList_original]
+assert all(prim.IsValid() for prim in primList_rdLarge_smBox_original),\
+    f"Some small box prims not found in {uPath_rdLarge_smBoxList_original}"
+prim_rdLarge_container = stage.GetPrimAtPath(uPath_rdLarge_container)
+assert prim_rdLarge_container.IsValid(), \
+    f"RackLarge container prim not found at {uPath_rdLarge_container}"
+prim_pwbh = stage.GetPrimAtPath(uPath_pwbh)
+assert prim_pwbh.IsValid(), \
+    f"PWBH prim not found at {uPath_pwbh}"
+primList_pwbh_smBox_original = [stage.GetPrimAtPath(path) for path in uPath_pwbh_smBoxList_original]
+assert all(prim.IsValid() for prim in primList_pwbh_smBox_original),\
+    f"Some small box prims not found in {uPath_pwbh_smBoxList_original}"
+prim_forklift = stage.GetPrimAtPath(uPath_forklift)
+assert prim_forklift.IsValid(), \
+    f"Forklift prim not found at {uPath_forklift}"
+prim_dumper = stage.GetPrimAtPath(uPath_dumper)
+assert prim_dumper.IsValid(), \
+    f"Dumper prim not found at {uPath_dumper}"
+
+"""2.2.3 Set Camera"""
+camera = Camera(prim_path=uPath_camera, resolution=(aParam_imgWidth, aParam_imgHeight))
+
+"""3. The Main Loop"""
+async def my_task():
+    """3.1 Timeline Start"""
+    timeline = usd.get_context().get_timeline()
+    timeline.play()
+    await asyncio.sleep(0.1)
+    camera.initialize()
+    await asyncio.sleep(0.1)
+
+    """3.2 Annotations Initialization"""
+    depth_annotator = AnnotatorRegistry.get_annotator("distance_to_image_plane") # Use "DepthLinearized" for depth annotation
+    depth_annotator.attach(camera.get_render_product_path())
+    instanceSemantic_annotator = AnnotatorRegistry.get_annotator("instance_segmentation")
+    instanceSemantic_annotator.attach(camera.get_render_product_path())
+    bounding_box_3d_anno = AnnotatorRegistry.get_annotator("bounding_box_3d")
+    bounding_box_3d_anno.attach(camera.get_render_product_path())
+
+    """3.3 Main Loop"""
+    while True:
+        """3.3.1 Scene Planning"""
+        """
+        LWRQ:
+            - LW: Lang, Width
+            - R: Need Rotation Constraint
+            - Q: Quantity
+        """
+        LWRQ_rdLarge = [2.0, 4.0, 1, random.randint(1, aParam_max_rdLarge)]
+        LWRQ_pwbh = [2.0, 2.0, 0, random.randint(1, aParam_max_pwbh)]
+        LWRQ_forkLift = [2.0, 4.0, 0, random.randint(0, aParam_max_forklift)]
+        LWRQ_dumper = [4.0, 1.5, 0, random.randint(0, aParam_max_dumper)]
+
+        createSceneTool = RectangleArranger2D(uParam_sceneSize)
+        descriptors_scene = np.array(createSceneTool.arrange_rects_2d_with_qty([LWRQ_rdLarge, LWRQ_pwbh, LWRQ_forkLift, LWRQ_dumper], max_trials_per_rect=2000))
+        descriptors_rdLarge = descriptors_scene[descriptors_scene[:, 0] == 0]
+        descriptors_pwbh = descriptors_scene[descriptors_scene[:, 0] == 1]
+        descriptors_forkLift = descriptors_scene[descriptors_scene[:, 0] == 2]
+        descriptors_dumper = descriptors_scene[descriptors_scene[:, 0] == 3]
+        print(f"Scene includes {len(descriptors_scene)} objects: {len(descriptors_rdLarge)} rdLarge(s), {len(descriptors_pwbh)} pwbh(s), {len(descriptors_forkLift)} forkLift(s), {len(descriptors_dumper)} dumper(s)")
+
+        """3.3.2 Move the camera"""
+        await asyncio.sleep(0.1)
+        target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        camOri = camPosOri(target_point, aParam_aimedPoint)
+        camera.set_world_pose(
+            position=target_point,
+            orientation=camOri,  
+        ) 
+        await asyncio.sleep(0.1)
+
+        """3.3.3 Scene Creating"""
+        print(f"Timeline is running: {timeline.is_playing()}")
+        print(f"time: {timeline.get_current_time()}")
+
+        """3.3.3.1 rdLarge Creation"""
+        print(f"Planning {len(descriptors_rdLarge)} rdLarge(s) with descriptors: {descriptors_rdLarge}")
+        sdf_rdLarge = Sdf.Path(uPath_rdLarge)
+        if not prim_rdLarge.IsActive():
+            print(f"{uPath_rdLarge} deactivated, activating...")
+            prim_rdLarge.SetActive(True)
+        primList_rdLarge_created = []
+        primListList_rdLarge_smBox_created = []
+        primListList_rdLarge_container_created = []
+        for i, desc in enumerate(descriptors_rdLarge):
+            px, py, pyaw = desc[1], desc[2], desc[3]
+            px = uParam_transScale * px
+            py = uParam_transScale * py
+            quantity_rdLarge_smBox = [random.randint(0, aParam_max_rdLarge_smBox[0]),
+                                    random.randint(0, aParam_max_rdLarge_smBox[1]), 
+                                    random.randint(0, aParam_max_rdLarge_smBox[2])]
+            """3.3.3.1.1 rdLarge smBox Heaps Creation"""
+            descriptors_rdLarge_smBox = pack_boxes_weighted_random(
+                uParam_rdLarge_Space, uParam_smBoxSizeList, quantity_rdLarge_smBox, 
+                support_threshold=uParam_supportThreshold, 
+                alpha=aParam_distriBoxWeightAlpha,
+                max_fail=50,
+                w_x=1, w_y=1, w_z=0.5, rdYaws=True
+            )
+            descriptors_rdLarge_smBox_center = boxCorner2boxCenter(descriptors_rdLarge_smBox, uParam_smBoxSizeList)
+            primList_rdLarge_smBox_created = []
+            for prim in primList_rdLarge_smBox_original:
+                imageable = UsdGeom.Imageable(prim)
+                imageable.MakeInvisible()
+            for j, bPDc in enumerate(descriptors_rdLarge_smBox_center):
+                seq, x, y, z, yaw = bPDc
+                x_w, y_w, z_w, _ = uParam_rdLarge_mtxTrans @ np.array([x, y, z, 1.0])
+                prim_original = primList_pwbh_smBox_original[seq]
+                path_new = f"/World/RackLarge_A1/Box_{seq}_{j}"
+                prim_new = stage.OverridePrim(path_new)
+                prim_new.GetReferences().AddReference(assetPath="", primPath=prim_original.GetPath())
+                if prim_new.IsValid():
+                    imageable = UsdGeom.Imageable(prim_new)
+                    imageable.MakeVisible()
+                    xform = UsdGeom.Xformable(prim_new)
+                    xform.ClearXformOpOrder()
+                    xform_trans = xform.AddTranslateOp(opSuffix="")
+                    xform_rot = xform.AddRotateXYZOp(opSuffix="")
+                    xform_trans.Set(value=Gf.Vec3d(x_w, y_w, z_w))
+                    xform_rot.Set(value=Gf.Vec3d(0, 0, yaw + uParam_rdLarge_yaw0))
+                    primList_rdLarge_smBox_created.append(prim_new)
+                    print(f"Placed box_{seq}_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+            primListList_rdLarge_smBox_created.append(primList_rdLarge_smBox_created)
+
+            """3.3.3.1.2 rdLarge container Creation"""
+            imageable = UsdGeom.Imageable(prim_rdLarge_container)
+            imageable.MakeInvisible()
+            LWRQ_rdLarge_container = [40, 30, 0, random.randint(1, aParam_max_rdLarge_container)]
+            createContainerTool = RectangleArranger2D(uParam_transScale*np.array(uParam_rdLarge_Space[:2]))
+            descriptors_rdLarge_container = createContainerTool.arrange_rects_2d_with_qty(
+                LWRQ_rdLarge_container, max_trials_per_rect=2000)
+            primList_rdLarge_container_created = []
+            for j, bPDc in enumerate(descriptors_rdLarge_container):
+                _, x_w, y_w, yaw = bPDc
+                z_w = uParam_transScale * uParam_rdLarge_Height_2
+                path_new = f"/World/RackLarge_A1/Container_{j}"
+                prim_new = stage.OverridePrim(path_new)
+                primList_rdLarge_container_created.append(prim_new)
+                prim_new.GetReferences().AddReference(assetPath="", primPath=uPath_rdLarge_container)
+                imageable = UsdGeom.Imageable(prim_new)
+                imageable.MakeVisible()
+                xform = UsdGeom.Xformable(prim_new)
+                xform.ClearXformOpOrder()
+                xform_trans = xform.AddTranslateOp(opSuffix="")
+                xform_rot = xform.AddRotateXYZOp(opSuffix="")
+                xform_trans.Set(value=Gf.Vec3d(x_w, y_w, z_w))
+                xform_rot.Set(value=Gf.Vec3d(0, 0, yaw))
+                print(f"Placed container_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+            primListList_rdLarge_container_created.append(primList_rdLarge_container_created)
+
+        """3.3.3.1.3 rdLarge Main Creation"""
+        
