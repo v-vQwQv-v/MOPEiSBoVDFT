@@ -22,6 +22,7 @@ import os
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import json
+import omni.kit.commands as cmds
 
 """0. Parameters"""
 """0.0 Path Management"""
@@ -656,5 +657,91 @@ async def my_task():
                 print(f"Placed container_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
             primListList_rdLarge_container_created.append(primList_rdLarge_container_created)
 
-        """3.3.3.1.3 rdLarge Main Creation"""
-        
+            """3.3.3.1.3 rdLarge Main Creation"""
+            path_rdLarge_new = f"/World/RackLarge_A1_Copy_{i}"
+            sdf_rdLarge_new = Sdf.Path(path_rdLarge_new)
+            prim_rdLarge_new = stage.GetPrimAtPath(sdf_rdLarge_new)
+            cmds.execute("CopyPrim", path_from=sdf_rdLarge, path_to=sdf_rdLarge_new)
+            xform_rdLarge = UsdGeom.Xformable(prim_rdLarge_new)
+            xform_rdLarge.ClearXformOpOrder()
+            xform_rdLarge_scaleOp = xform_rdLarge.AddScaleOp(opSuffix="")
+            xform_rdLarge_transOp = xform_rdLarge.AddTranslateOp(opSuffix="")
+            xform_rdLarge_rotOp = xform_rdLarge.AddRotateXYZOp(opSuffix="")
+            xform_rdLarge_scaleOp.Set(value=Gf.Vec3d(1/uParam_transScale, 1/uParam_transScale, 1/uParam_transScale))
+            xform_rdLarge_transOp.Set(value=Gf.Vec3d(px, py, 0))
+            xform_rdLarge_rotOp.Set(value=Gf.Vec3d(0, 0, pyaw))
+            primList_rdLarge_created.append(prim_rdLarge_new)
+
+            """3.3.3.1.4 Reset Original rdLarge"""
+            for box in primList_rdLarge_smBox_created:
+                if box.IsValid():
+                    box.GetStage().RemovePrim(box.GetPath())
+                    print(f"Deleted created small box at {box.GetPath()}")
+            for container in primList_rdLarge_container_created:
+                if container.IsValid():
+                    container.GetStage().RemovePrim(container.GetPath())
+                    print(f"Deleted created container at {container.GetPath()}")
+            for path in uPath_rdLarge_smBoxList_original:
+                prim = stage.GetPrimAtPath(path)
+                if prim.IsValid():
+                    imageable = UsdGeom.Imageable(prim)
+                    imageable.MakeVisible()
+                    print(f"Made original box at {path} visible.")
+            if prim_rdLarge_container.IsValid():
+                imageable = UsdGeom.Imageable(prim_rdLarge_container)
+                imageable.MakeVisible()
+                print(f"Made original rdLarge at {uPath_rdLarge_container} visible.")
+
+        """3.3.3.2 Set Original rdLarge Deactivated"""
+        if prim_rdLarge.IsValid():
+            imageable = UsdGeom.Imageable(prim_rdLarge)
+            imageable.MakeInvisible()
+            print(f"Made original rdLarge at {uPath_rdLarge} invisible.")
+
+        """3.3.3.3 Pwbh Creation"""
+        print(f"Planning {len(descriptors_pwbh)} original pwbh(s) with paths: {descriptors_pwbh}")
+        sdf_pwbh = Sdf.Path(uPath_pwbh)
+        if not prim_pwbh.IsActive():
+            print(f"{sdf_pwbh} deactivated, activating...")
+            prim_pwbh.SetActive(True)
+        primList_pwbh_created = []
+        for i, desc in enumerate(descriptors_pwbh):
+            px, py, pyaw = desc[1], desc[2], desc[3]
+            px = uParam_transScale * px
+            py = uParam_transScale * py
+            quantity_pwbh_smBox = [random.randint(0, aParam_max_pwbh_smBox[0]),
+                                   random.randint(0, aParam_max_pwbh_smBox[1]), 
+                                   random.randint(0, aParam_max_pwbh_smBox[2])]
+            """ 3.3.3.3.1 pwbh smBox Heaps Creation"""
+            descriptors_pwbh_smBox = pack_boxes_weighted_random(
+                uParam_pwbh_Space,
+                uParam_smBoxSizeList,
+                quantity_pwbh_smBox,
+                support_threshold=uParam_supportThreshold,
+                alpha=aParam_distriBoxWeightAlpha,
+                max_fail=50,
+                w_x=1, w_y=1, w_z=0.5, rdYaws=True
+            )
+            descriptors_pwbh_smBox_center = boxCorner2boxCenter(descriptors_pwbh_smBox, uParam_smBoxSizeList)
+            for path in uPath_pwbh_smBoxList_original:
+                prim = stage.GetPrimAtPath(path)
+                if prim.IsValid():
+                    imageable = UsdGeom.Imageable(prim)
+                    imageable.MakeInvisible()
+            primList_pwbh_smBox_created = []
+            for j, bPDc in enumerate(descriptors_pwbh_smBox_center):
+                seq, x, y, z, yaw = bPDc
+                x_w, y_w, z_w, _ = uParam_pwbh_mtxTrans @ np.array([x, y, z, 1.0])
+                prim_original = primList_pwbh_smBox_original[seq]
+                path_new = f"/World/WarehousePile_A6/Box_{seq}_{j}"
+                prim_new = stage.OverridePrim(path_new)
+                prim_new.GetReferences().AddReference(assetPath="", primPath=prim_original.GetPath())
+                if prim_new.IsValid():
+                    imageable = UsdGeom.Imageable(prim_new)
+                    imageable.MakeVisible()
+                    xform = UsdGeom.Xformable(prim_new)
+                    xform.ClearXformOpOrder()
+                    xform_transOp = xform.AddTranslateOp(opSuffix="")
+                    xform_rotOp = xform.AddRotateXYZOp(opSuffix="")
+                    xform_transOp.Set(value=Gf.Vec3d(x_w, y_w, z_w))
+                    xform_rotOp.Set(value=Gf.Vec3d(0, 0, yaw + uParam_pwbh_yaw0))
