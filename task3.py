@@ -87,7 +87,7 @@ uParam_pwbh_mtxTrans = uParam_transScale * np.array([[1, 0,  0, -uParam_pwbh_Spa
                                                      [0, 1,  0, -uParam_pwbh_Space[1]/2 + uParam_tolerance],
                                                      [0, 0,  1, uParam_pwbh_Height],
                                                      [0, 0,  0, 1]], dtype=np.float32)
-uParam_pwbh_yaw0 = 0
+uParam_pwbh_yaw0 = 90
 uPath_pwbh = "/World/WarehousePile_A6"
 uPath_pwbh_smBoxList_original = [
     "/World/WarehousePile_A6/Cardbox_D2",
@@ -436,6 +436,8 @@ class RectangleArranger2D:
             [int(seq), float(cx), float(cy), float(np.rad2deg(theta))]
             for (seq, cx, cy, theta, L, W) in placements_local
         ]
+        # if np.array(placements).shape == 4:
+        #     placements = [placements]
         return placements
 
     # --------- Geometry utils (private) ---------
@@ -503,58 +505,44 @@ layer = stage.GetRootLayer()
 """2.2.1 Delete redundant objects"""
 deleteCopy(stage)
 
-"""2.2.2 Check Scene"""
-prim_rdLarge = stage.GetPrimAtPath(uPath_rdLarge)
-assert prim_rdLarge.IsValid(), \
-    f"RackLarge prim not found at {uPath_rdLarge}"
-primList_rdLarge_smBox_original = [stage.GetPrimAtPath(path) for path in uPath_rdLarge_smBoxList_original]
-assert all(prim.IsValid() for prim in primList_rdLarge_smBox_original),\
-    f"Some small box prims not found in {uPath_rdLarge_smBoxList_original}"
-prim_rdLarge_container = stage.GetPrimAtPath(uPath_rdLarge_container)
-assert prim_rdLarge_container.IsValid(), \
-    f"RackLarge container prim not found at {uPath_rdLarge_container}"
-prim_pwbh = stage.GetPrimAtPath(uPath_pwbh)
-assert prim_pwbh.IsValid(), \
-    f"PWBH prim not found at {uPath_pwbh}"
-primList_pwbh_smBox_original = [stage.GetPrimAtPath(path) for path in uPath_pwbh_smBoxList_original]
-assert all(prim.IsValid() for prim in primList_pwbh_smBox_original),\
-    f"Some small box prims not found in {uPath_pwbh_smBoxList_original}"
-prim_forklift = stage.GetPrimAtPath(uPath_forklift)
-assert prim_forklift.IsValid(), \
-    f"Forklift prim not found at {uPath_forklift}"
-prim_dumper = stage.GetPrimAtPath(uPath_dumper)
-assert prim_dumper.IsValid(), \
-    f"Dumper prim not found at {uPath_dumper}"
-
 """2.2.3 Set Camera"""
 camera = Camera(prim_path=uPath_camera, resolution=(aParam_imgWidth, aParam_imgHeight))
 
 """3. The Main Loop"""
 async def my_task():
-    """3.1 Timeline Start"""
-    timeline = usd.get_context().get_timeline()
+    await asyncio.sleep(1)
+    timeline = omni.timeline.get_timeline_interface()
     timeline.play()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(1)
     camera.initialize()
-    await asyncio.sleep(0.1)
-
-    """3.2 Annotations Initialization"""
+    await asyncio.sleep(1)
     depth_annotator = AnnotatorRegistry.get_annotator("distance_to_image_plane") # Use "DepthLinearized" for depth annotation
     depth_annotator.attach(camera.get_render_product_path())
+    await asyncio.sleep(0.1)
     instanceSemantic_annotator = AnnotatorRegistry.get_annotator("instance_segmentation")
     instanceSemantic_annotator.attach(camera.get_render_product_path())
+    await asyncio.sleep(0.1)
     bounding_box_3d_anno = AnnotatorRegistry.get_annotator("bounding_box_3d")
     bounding_box_3d_anno.attach(camera.get_render_product_path())
 
-    """3.3 Main Loop"""
+    """Add Motion Vectors"""
+    camera.add_motion_vectors_to_frame()     
+    await asyncio.sleep(1)
+
+    """3.1 Main Loop"""
+    """
+        The scene should be planned first, to avoid the crash of isaac-sim, 
+        because the render of camera could not be changed so quickly.
+    """
     while True:
-        """3.3.1 Scene Planning"""
+        """3.1.1 Scene Planning"""
         """
         LWRQ:
             - LW: Lang, Width
             - R: Need Rotation Constraint
             - Q: Quantity
         """
+        await asyncio.sleep(5)
         LWRQ_rdLarge = [2.0, 4.0, 1, random.randint(1, aParam_max_rdLarge)]
         LWRQ_pwbh = [2.0, 2.0, 0, random.randint(1, aParam_max_pwbh)]
         LWRQ_forkLift = [2.0, 4.0, 0, random.randint(0, aParam_max_forklift)]
@@ -568,26 +556,29 @@ async def my_task():
         descriptors_dumper = descriptors_scene[descriptors_scene[:, 0] == 3]
         print(f"Scene includes {len(descriptors_scene)} objects: {len(descriptors_rdLarge)} rdLarge(s), {len(descriptors_pwbh)} pwbh(s), {len(descriptors_forkLift)} forkLift(s), {len(descriptors_dumper)} dumper(s)")
 
-        """3.3.2 Move the camera"""
-        await asyncio.sleep(0.1)
-        target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
-        camOri = camPosOri(target_point, aParam_aimedPoint)
-        camera.set_world_pose(
-            position=target_point,
-            orientation=camOri,  
-        ) 
-        await asyncio.sleep(0.1)
+        # """3.3.2 Move the camera"""
+        # await asyncio.sleep(0.1)
+        # target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        # camOri = camPosOri(target_point, aParam_aimedPoint)
+        # camera.set_world_pose(
+        #     position=target_point,
+        #     orientation=camOri,  
+        # ) 
+        # await asyncio.sleep(0.1)
 
-        """3.3.3 Scene Creating"""
-        print(f"Timeline is running: {timeline.is_playing()}")
-        print(f"time: {timeline.get_current_time()}")
+        """3.1.2 Scene Creating"""
+        # print(f"Timeline is running: {timeline.is_playing()}")
+        # print(f"time: {timeline.get_current_time()}")
 
-        """3.3.3.1 rdLarge Creation"""
+        """3.1.2.1 rdLarge Creation"""
         print(f"Planning {len(descriptors_rdLarge)} rdLarge(s) with descriptors: {descriptors_rdLarge}")
         sdf_rdLarge = Sdf.Path(uPath_rdLarge)
+        prim_rdLarge = stage.GetPrimAtPath(uPath_rdLarge)
         if not prim_rdLarge.IsActive():
             print(f"{uPath_rdLarge} deactivated, activating...")
             prim_rdLarge.SetActive(True)
+        primList_rdLarge_smBox_original = [stage.GetPrimAtPath(path) for path in uPath_rdLarge_smBoxList_original]
+        prim_rdLarge_container = stage.GetPrimAtPath(uPath_rdLarge_container)
         primList_rdLarge_created = []
         primListList_rdLarge_smBox_created = []
         primListList_rdLarge_container_created = []
@@ -598,7 +589,8 @@ async def my_task():
             quantity_rdLarge_smBox = [random.randint(0, aParam_max_rdLarge_smBox[0]),
                                     random.randint(0, aParam_max_rdLarge_smBox[1]), 
                                     random.randint(0, aParam_max_rdLarge_smBox[2])]
-            """3.3.3.1.1 rdLarge smBox Heaps Creation"""
+
+            """3.1.2.1.1 rdLarge smBox Heaps Creation"""
             descriptors_rdLarge_smBox = pack_boxes_weighted_random(
                 uParam_rdLarge_Space, uParam_smBoxSizeList, quantity_rdLarge_smBox, 
                 support_threshold=uParam_supportThreshold, 
@@ -614,7 +606,7 @@ async def my_task():
             for j, bPDc in enumerate(descriptors_rdLarge_smBox_center):
                 seq, x, y, z, yaw = bPDc
                 x_w, y_w, z_w, _ = uParam_rdLarge_mtxTrans @ np.array([x, y, z, 1.0])
-                prim_original = primList_pwbh_smBox_original[seq]
+                prim_original = primList_rdLarge_smBox_original[seq]
                 path_new = f"/World/RackLarge_A1/Box_{seq}_{j}"
                 prim_new = stage.OverridePrim(path_new)
                 prim_new.GetReferences().AddReference(assetPath="", primPath=prim_original.GetPath())
@@ -629,39 +621,53 @@ async def my_task():
                     xform_rot.Set(value=Gf.Vec3d(0, 0, yaw + uParam_rdLarge_yaw0))
                     primList_rdLarge_smBox_created.append(prim_new)
                     print(f"Placed box_{seq}_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+                await asyncio.sleep(0.5)
             primListList_rdLarge_smBox_created.append(primList_rdLarge_smBox_created)
+            print(f"Created {len(primList_rdLarge_smBox_created)} boxes completed.")
+            await asyncio.sleep(1)
 
-            """3.3.3.1.2 rdLarge container Creation"""
+            """3.1.2.1.2 rdLarge container Creation"""
+            if prim_rdLarge_container.IsValid():
+                print(f"prim_rdLarge_container is valid.")
+            else:
+                print(f"prim_rdLarge_container is not valid.")
             imageable = UsdGeom.Imageable(prim_rdLarge_container)
             imageable.MakeInvisible()
-            LWRQ_rdLarge_container = [40, 30, 0, random.randint(1, aParam_max_rdLarge_container)]
+            print(f"Made original rdLarge container at {uPath_rdLarge_container} invisible.")
+            LWRQ_rdLarge_container = [[40, 30, 0, random.randint(1, aParam_max_rdLarge_container)]]
+            print(f"{LWRQ_rdLarge_container} need to create.")
             createContainerTool = RectangleArranger2D(uParam_transScale*np.array(uParam_rdLarge_Space[:2]))
             descriptors_rdLarge_container = createContainerTool.arrange_rects_2d_with_qty(
                 LWRQ_rdLarge_container, max_trials_per_rect=2000)
+            print(descriptors_rdLarge_container)
             primList_rdLarge_container_created = []
-            for j, bPDc in enumerate(descriptors_rdLarge_container):
-                _, x_w, y_w, yaw = bPDc
-                z_w = uParam_transScale * uParam_rdLarge_Height_2
-                path_new = f"/World/RackLarge_A1/Container_{j}"
-                prim_new = stage.OverridePrim(path_new)
-                primList_rdLarge_container_created.append(prim_new)
-                prim_new.GetReferences().AddReference(assetPath="", primPath=uPath_rdLarge_container)
-                imageable = UsdGeom.Imageable(prim_new)
-                imageable.MakeVisible()
-                xform = UsdGeom.Xformable(prim_new)
-                xform.ClearXformOpOrder()
-                xform_trans = xform.AddTranslateOp(opSuffix="")
-                xform_rot = xform.AddRotateXYZOp(opSuffix="")
-                xform_trans.Set(value=Gf.Vec3d(x_w, y_w, z_w))
-                xform_rot.Set(value=Gf.Vec3d(0, 0, yaw))
-                print(f"Placed container_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+            if len(descriptors_rdLarge_container) != 0:
+                for j, bPDc in enumerate(descriptors_rdLarge_container):
+                    _, x_w, y_w, yaw = bPDc
+                    z_w = uParam_transScale * uParam_rdLarge_Height_2
+                    path_new = f"/World/RackLarge_A1/Container_{j}"
+                    prim_new = stage.OverridePrim(path_new)
+                    primList_rdLarge_container_created.append(prim_new)
+                    prim_new.GetReferences().AddReference(assetPath="", primPath=uPath_rdLarge_container)
+                    imageable = UsdGeom.Imageable(prim_new)
+                    imageable.MakeVisible()
+                    xform = UsdGeom.Xformable(prim_new)
+                    xform.ClearXformOpOrder()
+                    xform_trans = xform.AddTranslateOp(opSuffix="")
+                    xform_rot = xform.AddRotateXYZOp(opSuffix="")
+                    xform_trans.Set(value=Gf.Vec3d(x_w, y_w, z_w))
+                    xform_rot.Set(value=Gf.Vec3d(0, 0, yaw))
+                    print(f"Placed container_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+                    await asyncio.sleep(0.5)
             primListList_rdLarge_container_created.append(primList_rdLarge_container_created)
+            print(f"Created {len(primList_rdLarge_container_created)} containers completed.")
 
-            """3.3.3.1.3 rdLarge Main Creation"""
+            """3.1.2.1.3 rdLarge Main Creation"""
             path_rdLarge_new = f"/World/RackLarge_A1_Copy_{i}"
             sdf_rdLarge_new = Sdf.Path(path_rdLarge_new)
-            prim_rdLarge_new = stage.GetPrimAtPath(sdf_rdLarge_new)
+            print(f"Need Created new rdLarge at {path_rdLarge_new}")
             cmds.execute("CopyPrim", path_from=sdf_rdLarge, path_to=sdf_rdLarge_new)
+            prim_rdLarge_new = stage.GetPrimAtPath(sdf_rdLarge_new)
             xform_rdLarge = UsdGeom.Xformable(prim_rdLarge_new)
             xform_rdLarge.ClearXformOpOrder()
             xform_rdLarge_scaleOp = xform_rdLarge.AddScaleOp(opSuffix="")
@@ -671,8 +677,9 @@ async def my_task():
             xform_rdLarge_transOp.Set(value=Gf.Vec3d(px, py, 0))
             xform_rdLarge_rotOp.Set(value=Gf.Vec3d(0, 0, pyaw))
             primList_rdLarge_created.append(prim_rdLarge_new)
+            await asyncio.sleep(0.5)
 
-            """3.3.3.1.4 Reset Original rdLarge"""
+            """3.1.2.1.4 Reset Original rdLarge"""
             for box in primList_rdLarge_smBox_created:
                 if box.IsValid():
                     box.GetStage().RemovePrim(box.GetPath())
@@ -691,20 +698,25 @@ async def my_task():
                 imageable = UsdGeom.Imageable(prim_rdLarge_container)
                 imageable.MakeVisible()
                 print(f"Made original rdLarge at {uPath_rdLarge_container} visible.")
+            await asyncio.sleep(0.1)
 
-        """3.3.3.2 Set Original rdLarge Deactivated"""
+        """3.1.2.1.5 Set Original rdLarge Deactivated"""
         if prim_rdLarge.IsValid():
             imageable = UsdGeom.Imageable(prim_rdLarge)
             imageable.MakeInvisible()
             print(f"Made original rdLarge at {uPath_rdLarge} invisible.")
+        await asyncio.sleep(0.5)
 
-        """3.3.3.3 Pwbh Creation"""
+        """3.1.2.2 Pwbh Creation"""
         print(f"Planning {len(descriptors_pwbh)} original pwbh(s) with paths: {descriptors_pwbh}")
         sdf_pwbh = Sdf.Path(uPath_pwbh)
+        prim_pwbh = stage.GetPrimAtPath(uPath_pwbh)
         if not prim_pwbh.IsActive():
             print(f"{sdf_pwbh} deactivated, activating...")
             prim_pwbh.SetActive(True)
+        primList_pwbh_smBox_original = [stage.GetPrimAtPath(path) for path in uPath_pwbh_smBoxList_original]
         primList_pwbh_created = []
+        primListList_pwbh_smBox_created = []
         for i, desc in enumerate(descriptors_pwbh):
             px, py, pyaw = desc[1], desc[2], desc[3]
             px = uParam_transScale * px
@@ -712,7 +724,7 @@ async def my_task():
             quantity_pwbh_smBox = [random.randint(0, aParam_max_pwbh_smBox[0]),
                                    random.randint(0, aParam_max_pwbh_smBox[1]), 
                                    random.randint(0, aParam_max_pwbh_smBox[2])]
-            """ 3.3.3.3.1 pwbh smBox Heaps Creation"""
+            """ 3.1.2.2.1 pwbh smBox Heaps Creation"""
             descriptors_pwbh_smBox = pack_boxes_weighted_random(
                 uParam_pwbh_Space,
                 uParam_smBoxSizeList,
@@ -745,3 +757,179 @@ async def my_task():
                     xform_rotOp = xform.AddRotateXYZOp(opSuffix="")
                     xform_transOp.Set(value=Gf.Vec3d(x_w, y_w, z_w))
                     xform_rotOp.Set(value=Gf.Vec3d(0, 0, yaw + uParam_pwbh_yaw0))
+                    print(f"Placed box_{seq}_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
+                    primList_pwbh_smBox_created.append(prim_new)
+                await asyncio.sleep(0.5)
+            primListList_pwbh_smBox_created.append(primList_pwbh_smBox_created)
+            await asyncio.sleep(0.1)
+
+            """3.1.2.2.2 Copy Pwbhs"""
+            path_pwbh_new = f"/World/WarehousePile_A6_Copy_{i}"
+            sdf_pwbh_new = Sdf.Path(path_pwbh_new)
+            cmds.execute("CopyPrim", path_from=sdf_pwbh, path_to=sdf_pwbh_new)
+            prim_pwbh_new = stage.GetPrimAtPath(path_pwbh_new)
+            xform_pwbh = UsdGeom.Xformable(prim_pwbh_new)
+            xform_pwbh.ClearXformOpOrder()
+            xform_pwbh_scaleOp = xform_pwbh.AddScaleOp(opSuffix="")
+            xform_pwbh_transOp = xform_pwbh.AddTranslateOp(opSuffix="")
+            xform_pwbh_rotOp = xform_pwbh.AddRotateXYZOp(opSuffix="")
+            xform_pwbh_scaleOp.Set(value=Gf.Vec3d(1/uParam_transScale, 1/uParam_transScale, 1/uParam_transScale))
+            xform_pwbh_transOp.Set(value=Gf.Vec3d(px, py, 0))
+            xform_pwbh_rotOp.Set(value=Gf.Vec3d(0, 0, pyaw))
+            primList_pwbh_created.append(prim_pwbh_new)
+            await asyncio.sleep(0.1)
+
+            """3.1.2.2.3 Reset Original pwbh"""
+            for box in primList_pwbh_smBox_created:
+                if box.IsValid():
+                    box.GetStage().RemovePrim(box.GetPath())
+                    print(f"Deleted created small box at {box.GetPath()}")
+            for prim in primList_pwbh_smBox_original:
+                if prim.IsValid():
+                    imageable = UsdGeom.Imageable(prim)
+                    imageable.MakeVisible()
+                    print(f"Made original box at {prim.GetPath()} visible.")
+            await asyncio.sleep(0.1)
+
+        """3.1.2.2.4 Set original Pwbhs deactivated"""
+        if prim_pwbh.IsActive():
+            prim_pwbh.SetActive(False)
+            print(f"Deactivated original pwbh at {prim_pwbh.GetPath()}")
+        await asyncio.sleep(0.1)
+
+        """3.1.2.3 Dumper Creation"""
+        print(f"Planning {len(descriptors_dumper)} original dumper(s) with paths: {descriptors_dumper}")
+        sdf_dumper = Sdf.Path(uPath_dumper)
+        prim_dumper = stage.GetPrimAtPath(uPath_dumper)
+        if not prim_dumper.IsActive():
+            print(f"{sdf_dumper} deactivated, activating...")
+            prim_dumper.SetActive(True)
+        primList_dumper_created = []
+        for i, desc in enumerate(descriptors_dumper):
+            px, py, pyaw = desc[1], desc[2], desc[3]
+            px = uParam_dumper_transScale * (px + uParam_dumper_offsetXYZ[0])
+            py = uParam_dumper_transScale * (py + uParam_dumper_offsetXYZ[1])
+            pz = uParam_dumper_transScale * uParam_dumper_offsetXYZ[2]
+
+            """3.1.2.3.1 Copy Dumper"""
+            path_dumper_new = f"/World/Dumper_Copy_{i}"
+            sdf_dumper_new = Sdf.Path(path_dumper_new)
+            cmds.execute("CopyPrim", path_from=sdf_dumper, path_to=sdf_dumper_new)
+            prim_dumper_new = stage.GetPrimAtPath(path_dumper_new)
+            xform_dumper = UsdGeom.Xformable(prim_dumper_new)
+            xform_dumper.ClearXformOpOrder()
+            xform_dumper_scaleOp = xform_dumper.AddScaleOp(opSuffix="")
+            xform_dumper_transOp = xform_dumper.AddTranslateOp(opSuffix="")
+            xform_dumper_rotOp = xform_dumper.AddRotateXYZOp(opSuffix="")
+            xform_dumper_scaleOp.Set(value=Gf.Vec3d(uParam_dumper_transScale_T, uParam_dumper_transScale_T, uParam_dumper_transScale_T))
+            xform_dumper_transOp.Set(value=Gf.Vec3d(px, py, pz))
+            xform_dumper_rotOp.Set(value=Gf.Vec3d(0, 0, pyaw))
+            primList_dumper_created.append(prim_dumper_new)
+        await asyncio.sleep(0.5)
+
+        """3.1.2.3.2 Set original Dumper deactivated"""
+        if prim_dumper.IsActive():
+            prim_dumper.SetActive(False)
+            print(f"Deactivated original dumper at {prim_dumper.GetPath()}")
+            await asyncio.sleep(0.5)
+
+        """3.1.2.4 Forklift Creation"""
+        print(f"Planning {len(descriptors_forkLift)} original forklift(s) with paths: {descriptors_forkLift}")
+        sdf_forklift = Sdf.Path(uPath_forklift)
+        prim_forklift = stage.GetPrimAtPath(uPath_forklift)
+        if not prim_forklift.IsActive():
+            print(f"{sdf_forklift} deactivated, activating...")
+            prim_forklift.SetActive(True)
+        primList_forklift_created = []
+        for i, desc in enumerate(descriptors_forkLift):
+            px, py, pyaw = desc[1], desc[2], desc[3]
+
+            """3.1.2.4.1 Copy ForkLift"""
+            path_new = f"/World/warehouse_with_forklifts/ForkLift_Copy_{i}"
+            sdf_new = Sdf.Path(path_new)
+            cmds.execute("CopyPrim", path_from=sdf_forklift, path_to=sdf_new)
+            prim_new = stage.GetPrimAtPath(path_new)
+            xform = UsdGeom.Xformable(prim_new)
+            xform.ClearXformOpOrder()
+            xform_scaleOp = xform.AddScaleOp(opSuffix="")
+            xform_transOp = xform.AddTranslateOp(opSuffix="")
+            xform_rotOp = xform.AddRotateXYZOp(opSuffix="")
+            xform_scaleOp.Set(value=Gf.Vec3d(1, 1, 1))
+            xform_transOp.Set(value=Gf.Vec3d(px, py, 0))
+            xform_rotOp.Set(value=Gf.Vec3d(0, 0, pyaw))
+            primList_forklift_created.append(prim_new)
+            await asyncio.sleep(0.5)
+
+        """3.1.2.4.2 Set original ForkLift deactivated"""
+        if prim_forklift.IsActive():
+            prim_forklift.SetActive(False)
+            print(f"Deactivated original forklift at {prim_forklift.GetPath()}")
+            await asyncio.sleep(0.5)
+        
+        print(f"Created {len(primList_rdLarge_created)} rdLarge(s), "
+              f"{len(primList_pwbh_created)} pwbh(s), "
+              f"{len(primList_dumper_created)} dumper(s), "
+              f"{len(primList_forklift_created)} forklift(s).")
+
+        """3.1.3 RGB Image Collection"""
+        """3.1.3.1 Camera Planning"""
+        target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        camOri_1 = camPosOri(target_point, aParam_aimedPoint)
+        camera.set_world_pose(
+            position=target_point,
+            orientation=camOri_1,
+        )
+        await asyncio.sleep(1)
+
+        """3.1.3.2 Get RGBA Image_1 And Save It"""
+        rgb_image = camera.get_rgba()
+        print(f"Get RGBA with Frame_{aParam_iter}_1 is {rgb_image is not None}")
+        bgr_image = cv2.cvtColor(rgb_image[..., :3], cv2.COLOR_RGB2BGR)
+        cv2.imwrite(f"{path_dir_rgb}/rgbFrame_{aParam_iter}_1.png", bgr_image)
+
+        """3.1.3.3 Get Depth Image_1 And Save It"""
+        depth_data_1 = depth_annotator.get_data()
+        print(f" Get depth data with Frame_{aParam_iter}_1 is {depth_data_1 is not None}")
+        depth_data_n_1 = cv2.normalize(depth_data_1, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        depth_data_n_1 = 255 - depth_data_n_1
+        depth_image_1 = cv2.applyColorMap(depth_data_n_1, cv2.COLORMAP_JET)
+        cv2.imwrite(f"{path_dir_rgb}/depthFrame_{aParam_iter}_1.png", depth_image_1)
+        np.savetxt(f"{path_dir_depth}/depthData_{aParam_iter}_1.csv", depth_data_1, delimiter=' ')
+        await asyncio.sleep(1)
+
+        """3.1.3.4 Change the Camera Pose"""
+        camOri_2 = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        camera.set_world_pose(
+            position=target_point + np.array([0, 0, 1]),
+            orientation=camOri_2,
+        )
+        await asyncio.sleep(0.5)
+
+        """3.1.3.5 Get RGBA Image_2 And Save It"""
+        rgb_image_2 = camera.get_rgba()
+        print(f"Get RGBA with Frame_{aParam_iter}_2 is {rgb_image_2 is not None}")
+        bgr_image_2 = cv2.cvtColor(rgb_image_2[..., :3], cv2.COLOR_RGB2BGR)
+        cv2.imwrite(f"{path_dir_rgb}/rgbFrame_{aParam_iter}_2.png", bgr_image_2)
+
+        """3.1.3.6 Get Depth Image_2 And Save It"""
+        depth_data_2 = depth_annotator.get_data()
+        print(f" Get depth data with Frame_{aParam_iter}_2 is {depth_data_2 is not None}")
+        depth_data_n_2 = cv2.normalize(depth_data_2, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        depth_data_n_2 = 255 - depth_data_n_2
+        depth_image_2 = cv2.applyColorMap(depth_data_n_2, cv2.COLORMAP_JET)
+        cv2.imwrite(f"{path_dir_rgb}/depthFrame_{aParam_iter}_2.png", depth_image_2)
+        np.savetxt(f"{path_dir_depth}/depthData_{aParam_iter}_2.csv", depth_data_2, delimiter=' ')
+        await asyncio.sleep(1)
+
+        """X.0 Test"""
+        print("Test complete.")
+        await asyncio.sleep(10)
+        break
+
+
+
+
+
+
+
+asyncio.ensure_future(my_task())
