@@ -23,6 +23,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import json
 import omni.kit.commands as cmds
+import omni.kit.viewport.utility as vp_utils
+import gc
 
 """0. Parameters"""
 """0.0 Path Management"""
@@ -47,7 +49,7 @@ aParam_distriBoxWeightAlpha = 2.0 # Distribution of box weights
 """0.1.2 Time Parameters"""
 aParam_max_time = 10000
 aParam_iter = 0
-aParam_max_iter = 300
+aParam_max_iter = 10
 
 """0.1.3 Camera Parameters"""
 aParam_aimedPoint = np.array([0, 0, 1.5])
@@ -102,6 +104,20 @@ uParam_dumper_offsetXYZ = [-0.8, 0, 0.45]
 uParam_dumper_transScale = 1000.0
 uParam_dumper_transScale_T = 1/uParam_dumper_transScale
 uPath_dumper = "/World/_9684481"
+print(f"Parameter Initialization Complete.")
+
+"""0.3 Save Data"""
+source_classes = {
+    "rack": 0,
+    "blockpallet": 1,
+    "dumper": 2,
+    "forklift": 3,
+    "cardbox_a": 4,
+    "cardbox_c": 5,
+    "cardbox_d": 6,
+    "container": 7
+}
+target_classes = {"rack", "pallet", "dumper", "forklift", "cardbox_small", "cardbox_middle", "cardbox_large", "container"}
 
 """1. Functions"""
 def bboxDict_to_transform(bbox_dict):
@@ -473,6 +489,8 @@ class RectangleArranger2D:
                 return False
         return True
 
+print(f"Function Initialization Complete.")
+
 """2. Preparation"""
 """2.1 Directories Check for saving images and labels"""
 if not os.path.exists(path_dir_script):
@@ -507,35 +525,20 @@ deleteCopy(stage)
 
 """2.2.3 Set Camera"""
 camera = Camera(prim_path=uPath_camera, resolution=(aParam_imgWidth, aParam_imgHeight))
+prim_camera = stage.GetPrimAtPath(uPath_camera)
+if prim_camera.IsActive():
+    print(f"{uPath_camera} set deactivated")
+    prim_camera.SetActive(False)
 
 """3. The Main Loop"""
 async def my_task():
-    await asyncio.sleep(1)
-    timeline = omni.timeline.get_timeline_interface()
-    timeline.play()
-    await asyncio.sleep(1)
-    camera.initialize()
-    await asyncio.sleep(1)
-    depth_annotator = AnnotatorRegistry.get_annotator("distance_to_image_plane") # Use "DepthLinearized" for depth annotation
-    depth_annotator.attach(camera.get_render_product_path())
-    await asyncio.sleep(0.1)
-    instanceSemantic_annotator = AnnotatorRegistry.get_annotator("instance_segmentation")
-    instanceSemantic_annotator.attach(camera.get_render_product_path())
-    await asyncio.sleep(0.1)
-    bounding_box_3d_anno = AnnotatorRegistry.get_annotator("bounding_box_3d")
-    bounding_box_3d_anno.attach(camera.get_render_product_path())
-
-    """Add Motion Vectors"""
-    camera.add_motion_vectors_to_frame()     
-    await asyncio.sleep(1)
-
-    """3.1 Main Loop"""
+    global aParam_iter
     """
         The scene should be planned first, to avoid the crash of isaac-sim, 
         because the render of camera could not be changed so quickly.
     """
-    while True:
-        """3.1.1 Scene Planning"""
+    while aParam_iter < aParam_max_iter:
+        """3.1 Scene Planning"""
         """
         LWRQ:
             - LW: Lang, Width
@@ -566,11 +569,11 @@ async def my_task():
         # ) 
         # await asyncio.sleep(0.1)
 
-        """3.1.2 Scene Creating"""
+        """3.2 Scene Creating"""
         # print(f"Timeline is running: {timeline.is_playing()}")
         # print(f"time: {timeline.get_current_time()}")
 
-        """3.1.2.1 rdLarge Creation"""
+        """3.2.1 rdLarge Creation"""
         print(f"Planning {len(descriptors_rdLarge)} rdLarge(s) with descriptors: {descriptors_rdLarge}")
         sdf_rdLarge = Sdf.Path(uPath_rdLarge)
         prim_rdLarge = stage.GetPrimAtPath(uPath_rdLarge)
@@ -590,7 +593,7 @@ async def my_task():
                                     random.randint(0, aParam_max_rdLarge_smBox[1]), 
                                     random.randint(0, aParam_max_rdLarge_smBox[2])]
 
-            """3.1.2.1.1 rdLarge smBox Heaps Creation"""
+            """3.2.1.1 rdLarge smBox Heaps Creation"""
             descriptors_rdLarge_smBox = pack_boxes_weighted_random(
                 uParam_rdLarge_Space, uParam_smBoxSizeList, quantity_rdLarge_smBox, 
                 support_threshold=uParam_supportThreshold, 
@@ -621,12 +624,12 @@ async def my_task():
                     xform_rot.Set(value=Gf.Vec3d(0, 0, yaw + uParam_rdLarge_yaw0))
                     primList_rdLarge_smBox_created.append(prim_new)
                     print(f"Placed box_{seq}_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
             primListList_rdLarge_smBox_created.append(primList_rdLarge_smBox_created)
             print(f"Created {len(primList_rdLarge_smBox_created)} boxes completed.")
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
-            """3.1.2.1.2 rdLarge container Creation"""
+            """3.2.1.2 rdLarge container Creation"""
             if prim_rdLarge_container.IsValid():
                 print(f"prim_rdLarge_container is valid.")
             else:
@@ -658,11 +661,11 @@ async def my_task():
                     xform_trans.Set(value=Gf.Vec3d(x_w, y_w, z_w))
                     xform_rot.Set(value=Gf.Vec3d(0, 0, yaw))
                     print(f"Placed container_{j} at ({x_w}, {y_w}, {z_w}) with yaw {yaw} degrees.")
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.1)
             primListList_rdLarge_container_created.append(primList_rdLarge_container_created)
             print(f"Created {len(primList_rdLarge_container_created)} containers completed.")
 
-            """3.1.2.1.3 rdLarge Main Creation"""
+            """3.2.1.3 rdLarge Main Creation"""
             path_rdLarge_new = f"/World/RackLarge_A1_Copy_{i}"
             sdf_rdLarge_new = Sdf.Path(path_rdLarge_new)
             print(f"Need Created new rdLarge at {path_rdLarge_new}")
@@ -679,7 +682,7 @@ async def my_task():
             primList_rdLarge_created.append(prim_rdLarge_new)
             await asyncio.sleep(0.5)
 
-            """3.1.2.1.4 Reset Original rdLarge"""
+            """3.2.1.4 Reset Original rdLarge"""
             for box in primList_rdLarge_smBox_created:
                 if box.IsValid():
                     box.GetStage().RemovePrim(box.GetPath())
@@ -699,15 +702,18 @@ async def my_task():
                 imageable.MakeVisible()
                 print(f"Made original rdLarge at {uPath_rdLarge_container} visible.")
             await asyncio.sleep(0.1)
+            if prim_rdLarge.IsValid():
+                imageable = UsdGeom.Imageable(prim_rdLarge)
+                imageable.MakeVisible()
+                print(f"Made original rdLarge at {uPath_rdLarge} visible.")
 
-        """3.1.2.1.5 Set Original rdLarge Deactivated"""
-        if prim_rdLarge.IsValid():
-            imageable = UsdGeom.Imageable(prim_rdLarge)
-            imageable.MakeInvisible()
-            print(f"Made original rdLarge at {uPath_rdLarge} invisible.")
+        """3.2.1.5 Set Original rdLarge Deactivated"""
+        if prim_rdLarge.IsActive():
+            prim_rdLarge.SetActive(False)
+            print(f"RdLarge at {uPath_rdLarge} deactivated.")
         await asyncio.sleep(0.5)
 
-        """3.1.2.2 Pwbh Creation"""
+        """3.2.2 Pwbh Creation"""
         print(f"Planning {len(descriptors_pwbh)} original pwbh(s) with paths: {descriptors_pwbh}")
         sdf_pwbh = Sdf.Path(uPath_pwbh)
         prim_pwbh = stage.GetPrimAtPath(uPath_pwbh)
@@ -724,7 +730,7 @@ async def my_task():
             quantity_pwbh_smBox = [random.randint(0, aParam_max_pwbh_smBox[0]),
                                    random.randint(0, aParam_max_pwbh_smBox[1]), 
                                    random.randint(0, aParam_max_pwbh_smBox[2])]
-            """ 3.1.2.2.1 pwbh smBox Heaps Creation"""
+            """ 3.2.2.1 pwbh smBox Heaps Creation"""
             descriptors_pwbh_smBox = pack_boxes_weighted_random(
                 uParam_pwbh_Space,
                 uParam_smBoxSizeList,
@@ -763,7 +769,7 @@ async def my_task():
             primListList_pwbh_smBox_created.append(primList_pwbh_smBox_created)
             await asyncio.sleep(0.1)
 
-            """3.1.2.2.2 Copy Pwbhs"""
+            """3.2.2.2 Copy Pwbhs"""
             path_pwbh_new = f"/World/WarehousePile_A6_Copy_{i}"
             sdf_pwbh_new = Sdf.Path(path_pwbh_new)
             cmds.execute("CopyPrim", path_from=sdf_pwbh, path_to=sdf_pwbh_new)
@@ -779,7 +785,7 @@ async def my_task():
             primList_pwbh_created.append(prim_pwbh_new)
             await asyncio.sleep(0.1)
 
-            """3.1.2.2.3 Reset Original pwbh"""
+            """3.2.2.3 Reset Original pwbh"""
             for box in primList_pwbh_smBox_created:
                 if box.IsValid():
                     box.GetStage().RemovePrim(box.GetPath())
@@ -789,15 +795,19 @@ async def my_task():
                     imageable = UsdGeom.Imageable(prim)
                     imageable.MakeVisible()
                     print(f"Made original box at {prim.GetPath()} visible.")
+            if prim_pwbh.IsValid():
+                imageable = UsdGeom.Imageable(prim_pwbh)
+                imageable.MakeVisible()
+                print(f"Made original pwbh at {uPath_pwbh} visible.")
             await asyncio.sleep(0.1)
 
-        """3.1.2.2.4 Set original Pwbhs deactivated"""
+        """3.2.2.4 Set original Pwbhs deactivated"""
         if prim_pwbh.IsActive():
             prim_pwbh.SetActive(False)
             print(f"Deactivated original pwbh at {prim_pwbh.GetPath()}")
         await asyncio.sleep(0.1)
 
-        """3.1.2.3 Dumper Creation"""
+        """3.2.3 Dumper Creation"""
         print(f"Planning {len(descriptors_dumper)} original dumper(s) with paths: {descriptors_dumper}")
         sdf_dumper = Sdf.Path(uPath_dumper)
         prim_dumper = stage.GetPrimAtPath(uPath_dumper)
@@ -811,7 +821,7 @@ async def my_task():
             py = uParam_dumper_transScale * (py + uParam_dumper_offsetXYZ[1])
             pz = uParam_dumper_transScale * uParam_dumper_offsetXYZ[2]
 
-            """3.1.2.3.1 Copy Dumper"""
+            """3.2.3.1 Copy Dumper"""
             path_dumper_new = f"/World/Dumper_Copy_{i}"
             sdf_dumper_new = Sdf.Path(path_dumper_new)
             cmds.execute("CopyPrim", path_from=sdf_dumper, path_to=sdf_dumper_new)
@@ -827,13 +837,13 @@ async def my_task():
             primList_dumper_created.append(prim_dumper_new)
         await asyncio.sleep(0.5)
 
-        """3.1.2.3.2 Set original Dumper deactivated"""
+        """3.2.3.2 Set original Dumper deactivated"""
         if prim_dumper.IsActive():
             prim_dumper.SetActive(False)
             print(f"Deactivated original dumper at {prim_dumper.GetPath()}")
             await asyncio.sleep(0.5)
 
-        """3.1.2.4 Forklift Creation"""
+        """3.2.4 Forklift Creation"""
         print(f"Planning {len(descriptors_forkLift)} original forklift(s) with paths: {descriptors_forkLift}")
         sdf_forklift = Sdf.Path(uPath_forklift)
         prim_forklift = stage.GetPrimAtPath(uPath_forklift)
@@ -844,7 +854,7 @@ async def my_task():
         for i, desc in enumerate(descriptors_forkLift):
             px, py, pyaw = desc[1], desc[2], desc[3]
 
-            """3.1.2.4.1 Copy ForkLift"""
+            """3.2.4.1 Copy ForkLift"""
             path_new = f"/World/warehouse_with_forklifts/ForkLift_Copy_{i}"
             sdf_new = Sdf.Path(path_new)
             cmds.execute("CopyPrim", path_from=sdf_forklift, path_to=sdf_new)
@@ -860,7 +870,7 @@ async def my_task():
             primList_forklift_created.append(prim_new)
             await asyncio.sleep(0.5)
 
-        """3.1.2.4.2 Set original ForkLift deactivated"""
+        """3.2.4.2 Set original ForkLift deactivated"""
         if prim_forklift.IsActive():
             prim_forklift.SetActive(False)
             print(f"Deactivated original forklift at {prim_forklift.GetPath()}")
@@ -871,23 +881,64 @@ async def my_task():
               f"{len(primList_dumper_created)} dumper(s), "
               f"{len(primList_forklift_created)} forklift(s).")
 
-        """3.1.3 RGB Image Collection"""
-        """3.1.3.1 Camera Planning"""
-        target_point = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
-        camOri_1 = camPosOri(target_point, aParam_aimedPoint)
-        camera.set_world_pose(
-            position=target_point,
-            orientation=camOri_1,
-        )
+        """3.3 Camera Setting"""
+        if not prim_camera.IsActive():
+            print(f"{uPath_camera} set deactivated")
+            prim_camera.SetActive(True)
+        await asyncio.sleep(2)
+
+        """3.3.1 Camera Initialization"""
+        camera.initialize()
+        await asyncio.sleep(2)
+
+        """3.3.2 Depth Annotation"""
+        depth_annotator = AnnotatorRegistry.get_annotator("distance_to_image_plane") # Use "DepthLinearized" for depth annotation
+        depth_annotator.attach(camera.get_render_product_path())
         await asyncio.sleep(1)
 
-        """3.1.3.2 Get RGBA Image_1 And Save It"""
+        """3.3.3 Instance Segmentation Annotation"""
+        instanceSemantic_annotator = AnnotatorRegistry.get_annotator("instance_segmentation")
+        instanceSemantic_annotator.attach(camera.get_render_product_path())
+        await asyncio.sleep(1)
+
+        """3.3.4 Bounding Box 3D Annotation"""
+        bounding_box_3d_anno = AnnotatorRegistry.get_annotator("bounding_box_3d")
+        bounding_box_3d_anno.attach(camera.get_render_product_path())
+        print("Camera initialized and annotators attached.")
+        await asyncio.sleep(1)
+
+        """3.3.5 Timeline Control - Play"""
+        timeline = omni.timeline.get_timeline_interface()
+        timeline.play()
+        await asyncio.sleep(1)
+
+        """3.3.6 Add Motion Vectors"""
+        camera.add_motion_vectors_to_frame() 
+        print("Motion vectors added to the camera frame.")    
+        await asyncio.sleep(1)
+
+        """3.4 Image Data Collection"""
+        """3.4.1 Camera Planning"""
+        target_point_1 = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        camOri_1 = camPosOri(target_point_1, aParam_aimedPoint)
+        camera.set_world_pose(
+            position=target_point_1,
+            orientation=camOri_1,
+        )
+        try:
+            camPose_1 = get_obj_pose(stage, "/World/Camera_0")
+            print(f"camPose_1 with Frame_{aParam_iter}: {camPose_1}")
+        except ValueError:
+            print(f"camPose_1 with Frame_{aParam_iter}: False!")
+        await asyncio.sleep(3)
+
+        """3.4.2 Get RGBA Image_1 And Save It"""
         rgb_image = camera.get_rgba()
         print(f"Get RGBA with Frame_{aParam_iter}_1 is {rgb_image is not None}")
         bgr_image = cv2.cvtColor(rgb_image[..., :3], cv2.COLOR_RGB2BGR)
         cv2.imwrite(f"{path_dir_rgb}/rgbFrame_{aParam_iter}_1.png", bgr_image)
 
-        """3.1.3.3 Get Depth Image_1 And Save It"""
+        """3.4.3 Get Depth Image_1 And Save It"""
         depth_data_1 = depth_annotator.get_data()
         print(f" Get depth data with Frame_{aParam_iter}_1 is {depth_data_1 is not None}")
         depth_data_n_1 = cv2.normalize(depth_data_1, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
@@ -895,23 +946,32 @@ async def my_task():
         depth_image_1 = cv2.applyColorMap(depth_data_n_1, cv2.COLORMAP_JET)
         cv2.imwrite(f"{path_dir_rgb}/depthFrame_{aParam_iter}_1.png", depth_image_1)
         np.savetxt(f"{path_dir_depth}/depthData_{aParam_iter}_1.csv", depth_data_1, delimiter=' ')
+        print(f"Saved RGB and depth images for Frame_{aParam_iter}_1.")
         await asyncio.sleep(1)
 
-        """3.1.3.4 Change the Camera Pose"""
-        camOri_2 = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        """3.4.4 Change the Camera Pose"""
+        target_point_2 = np.array([8.0, np.random.uniform(-10, 10), np.random.uniform(1.5, 5)])
+        camOri_2 = camPosOri(target_point_2, aParam_aimedPoint)
         camera.set_world_pose(
-            position=target_point + np.array([0, 0, 1]),
+            position=target_point_2,
             orientation=camOri_2,
         )
-        await asyncio.sleep(0.5)
+        try:
+            camPose_2 = get_obj_pose(stage, "/World/Camera_0")
+            print(f"camPose with Frame_{aParam_iter}: {camPose_2}")
+        except ValueError:
+            print(f"camPose with Frame_{aParam_iter}: False!")
+        await asyncio.sleep(3)
+        # camera.add_motion_vectors_to_frame() 
+        # await asyncio.sleep(1)
 
-        """3.1.3.5 Get RGBA Image_2 And Save It"""
+        """3.4.5 Get RGBA Image_2 And Save It"""
         rgb_image_2 = camera.get_rgba()
         print(f"Get RGBA with Frame_{aParam_iter}_2 is {rgb_image_2 is not None}")
         bgr_image_2 = cv2.cvtColor(rgb_image_2[..., :3], cv2.COLOR_RGB2BGR)
         cv2.imwrite(f"{path_dir_rgb}/rgbFrame_{aParam_iter}_2.png", bgr_image_2)
 
-        """3.1.3.6 Get Depth Image_2 And Save It"""
+        """3.4.6 Get Depth Image_2 And Save It"""
         depth_data_2 = depth_annotator.get_data()
         print(f" Get depth data with Frame_{aParam_iter}_2 is {depth_data_2 is not None}")
         depth_data_n_2 = cv2.normalize(depth_data_2, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
@@ -921,15 +981,99 @@ async def my_task():
         np.savetxt(f"{path_dir_depth}/depthData_{aParam_iter}_2.csv", depth_data_2, delimiter=' ')
         await asyncio.sleep(1)
 
+        """3.4.7 Timeline Control - Stop"""
+        await asyncio.sleep(1)
+        timeline.stop()
+
+        """3.4.8 Set Camera Deactivation"""
+        if prim_camera.IsActive():
+            print(f"{uPath_camera} set deactivated")
+            prim_camera.SetActive(False)
+
+        """3.5 Label Collection"""
+        """
+            Get Labels and save them
+            The json-file of labels shounld be like this:
+            {
+                "class": ["Rack": 0, "pallet": 1, "dumper": 2, "forklift": 3, "cardbox_small": 4, 
+                            "cardbox_middle": 5, "cardbox_large": 6, "container": 7],
+                "idx": [[0, 1], [0, 2], ...[classId, InstanceId]],
+                "instanceSemantics": [semantic image with box id, where background is -1],
+                "objPose": [[x, y, z, roll, pitch, yaw, size_x, size_y, size_z],...],
+                "camPose_1": [x, y, z, qx, qy, qz, qw],
+                "camPose_2": [x, y, z, qx, qy, qz, qw],
+                "camParam": [horizontal_aperture, vertical_aperture, focal, paramImg_width, paramImg_height]
+            }
+        """
+
+        """3.5.1 Camera Parameters"""
+        try:
+            horizontal_aperture = camera.get_horizontal_aperture()  
+            focal_length = camera.get_focal_length() 
+            vertical_aperture = horizontal_aperture * (aParam_imgHeight / aParam_imgWidth)
+            print(f"horizontal_aperture: {horizontal_aperture}, vertical_aperture: {vertical_aperture}, focal_length: {focal_length}")
+            camParam = [horizontal_aperture, vertical_aperture, focal_length]
+        except ValueError:
+            print(f"camParam with Frame_{aParam_iter}: False!")
+
+        """3.5.2 Instance Semantics"""
+        listIdx = []
+        try:
+            instanceSemantic_data = instanceSemantic_annotator.get_data()
+            print(f"Get instanceSemantic data with Frame_{aParam_iter} is {instanceSemantic_data is not None}")
+            id_to_semantics = instanceSemantic_data['info']['idToSemantics']
+            mask_instanceSemantic = np.zeros((aParam_imgHeight, aParam_imgWidth), dtype=np.int32)
+            mask_instanceSemantic.fill(-1)
+            instIdx = 0
+            for source_id, source_data in id_to_semantics.items():
+                source_id = int(source_id)
+                class_name = source_data.get("class", "").lower()
+                if class_name in source_classes:
+                    mask_instanceSemantic[instanceSemantic_data['data'] == source_id] = instIdx
+                    instIdx += 1
+                    listIdx.append([source_classes[class_name], instIdx, source_id])
+            listIdx = np.array(listIdx)
+            listIdx = listIdx[listIdx[:, 0].argsort()]
+        except ValueError:
+            print(f"instanceSemantics with Frame_{aParam_iter}: False!")
+
+        """3.5.3 Bounding Box"""
+        listPose = []
+        try:
+            bounding_box_3d_data = bounding_box_3d_anno.get_data()
+            print(f"Get bounding_box_3d data with Frame_{aParam_iter} is {bounding_box_3d_data is not None}")
+            bounding_box_3d_dd = bounding_box_3d_data['data']
+            id_to_bounding_box = bounding_box_3d_data['info']['idToBoundingBox']
+            for _, instIdx, source_idx in listIdx.tolist():
+                if source_id not in id_to_bounding_box:
+                    continue  # 跳过无效id
+                bbox_dict = bounding_box_3d_dd[str(source_idx)]
+                center_world, size_world, euler_angle = bboxDict_to_transform(bbox_dict)
+                """
+                shape:
+                    instIdx: 1
+                    center_world: [3,]
+                    size_world: [3,]
+                    euler_angle: [3,]
+                """
+                objPose = np.concatenate(([instIdx], center_world, size_world, euler_angle))
+                listPose.append(objPose)
+        except ValueError:
+            print(f"Bounding Box with Frame_{aParam_iter}: False!")
+
+        """3.4 Label To Json"""
+        label = dict(
+            
+
+        )
+
         """X.0 Test"""
-        print("Test complete.")
-        await asyncio.sleep(10)
-        break
-
-
-
-
-
+        deleteCopy(stage)
+        await asyncio.sleep(1)
+        gc.collect()
+        await asyncio.sleep(1)
+        aParam_iter += 1
 
 
 asyncio.ensure_future(my_task())
+print("Task Completion.")

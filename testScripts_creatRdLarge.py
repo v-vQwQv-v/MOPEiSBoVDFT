@@ -611,21 +611,21 @@ print(f"Scene includes {len(sceneDescriptors)} objects: {len(listRdLargeDescript
 #         path.GetStage().RemovePrim(path.GetPath())
 #         print(f"Deleted created pwbh at {path.GetPath()}")
 
-prefixesDelete = [
-    "/World/RackLarge_A1_Copy_",
-    "/World/WarehousePile_A6_Copy_",
-    "/World/Dumper_Copy_",
-]
-for prim in stage.GetPrimAtPath("/World").GetChildren():
-    path = str(prim.GetPath())
-    for pref in prefixesDelete:
-        if path.startswith(pref):
-            stage.RemovePrim(prim.GetPath())
-            print(f"Deleted prim: {path}")
-            break
-for prim in stage.GetPrimAtPath("/World/warehouse_with_forklifts").GetChildren():
-    path = str(prim.GetPath())
-    if path.startswith("/World/warehouse_with_forklifts/ForkLift_Copy_"):
-        stage.RemovePrim(prim.GetPath())
-        print(f"Deleted prim: {path}")
-        break
+# prefixesDelete = [
+#     "/World/RackLarge_A1_Copy_",
+#     "/World/WarehousePile_A6_Copy_",
+#     "/World/Dumper_Copy_",
+# ]
+# for prim in stage.GetPrimAtPath("/World").GetChildren():
+#     path = str(prim.GetPath())
+#     for pref in prefixesDelete:
+#         if path.startswith(pref):
+#             stage.RemovePrim(prim.GetPath())
+#             print(f"Deleted prim: {path}")
+#             break
+# for prim in stage.GetPrimAtPath("/World/warehouse_with_forklifts").GetChildren():
+#     path = str(prim.GetPath())
+#     if path.startswith("/World/warehouse_with_forklifts/ForkLift_Copy_"):
+#         stage.RemovePrim(prim.GetPath())
+#         print(f"Deleted prim: {path}")
+#         break

@@ -29,17 +29,45 @@ instanceSemantic_data = instanceSemantic_annotator.get_data()
 print(f"semantic_data: {instanceSemantic_data}")
 
 # 第六段
-id_to_labels = instanceSemantic_data['info']['idToLabels']
-mask = []
-for sem_id, label_info in id_to_labels.items():
-    for i in range(20):
-        if label_info == f'/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}/SM_CardBoxC_01':
-            print(f"box_id: {sem_id}")
-            mask.append(instanceSemantic_data['data'] == int(sem_id))
+# id_to_labels = instanceSemantic_data['info']['idToLabels']
+# mask = []
+# for sem_id, label_info in id_to_labels.items():
+#     for i in range(20):
+#         if label_info == f'/World/warehouse_with_forklifts/SM_CardBoxC_Copy_{i}/SM_CardBoxC_01':
+#             print(f"box_id: {sem_id}")
+#             mask.append(instanceSemantic_data['data'] == int(sem_id))
 
-instanceSemantic_image = cv2.cvtColor(camera.get_rgb(), cv2.COLOR_BGR2RGB)
+# instanceSemantic_image = cv2.cvtColor(camera.get_rgb(), cv2.COLOR_BGR2RGB)
 
-for j in range(len(mask)):
-    instanceSemantic_image[mask[j] == 1] = np.random.randint(0, 256, size=3)
+# for j in range(len(mask)):
+#     instanceSemantic_image[mask[j] == 1] = np.random.randint(0, 256, size=3)
 
-cv2.imwrite(f"{script_dir}/test_instanceSemantic.png", instanceSemantic_image)
+# cv2.imwrite(f"{script_dir}/test_instanceSemantic.png", instanceSemantic_image)
+
+# 第六段
+semantic_id_map = instanceSemantic_data['data']  # shape: (H, W), dtype=uint32
+height, width = semantic_id_map.shape
+id_to_semantics = instanceSemantic_data['info']['idToSemantics']
+target_classes = {"blockpallet", "container", "cardbox_a", "cardbox_c", "cardbox_d", "rack", "dumper", "forklift"}
+id_to_semantics = instanceSemantic_data['info']['idToSemantics']
+valid_ids = [
+    int(sem_id) for sem_id, sem in id_to_semantics.items()
+    if sem.get('class') in target_classes
+]
+id_to_color = {}
+rng = np.random.default_rng(seed=42)
+for sem_id_str, sem_data in id_to_semantics.items():
+    sem_id = int(sem_id_str)
+    class_name = sem_data.get("class", "").lower()
+    if class_name in target_classes:
+        id_to_color[sem_id] = rng.integers(0, 256, size=3, dtype=np.uint8)
+mask_color_image = np.zeros((height, width, 3), dtype=np.uint8)
+for sem_id, color in id_to_color.items():
+    mask = (semantic_id_map == sem_id)
+    mask_color_image[mask] = color
+rgb = camera.get_rgb()
+rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+overlay = cv2.addWeighted(rgb, 0.5, mask_color_image, 0.5, 0)
+cv2.imwrite(f"{script_dir}/semantic_overlay_target_classes.png", overlay)
+cv2.imwrite(f"{script_dir}/semantic_mask_target_classes.png", mask_color_image)
+print("Valid IDs for target classes:", valid_ids)
