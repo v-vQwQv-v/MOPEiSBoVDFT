@@ -27,6 +27,7 @@ instanceSemantic_annotator.attach(camera.get_render_product_path())
 # 第五段
 instanceSemantic_data = instanceSemantic_annotator.get_data() 
 print(f"semantic_data: {instanceSemantic_data}")
+print(f"semantic_data['info']['idToSemantics']: {instanceSemantic_data['info']['idToSemantics']}")
 
 # 第六段
 # id_to_labels = instanceSemantic_data['info']['idToLabels']

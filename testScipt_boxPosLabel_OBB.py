@@ -28,10 +28,11 @@ bounding_box_3d_anno.attach(camera.get_render_product_path())
 
 # 第五段
 bounding_box_3d_data = bounding_box_3d_anno.get_data()
-
+print(f"bounding_box_3d_data: {bounding_box_3d_data}")
+print(f"bounding_box_3d_data['info']['idToLabels']: {bounding_box_3d_data['info']['idToLabels']}")
 # 第五段
 bounding_box_3d_dd = bounding_box_3d_data['data']
-bbox_ids = bounding_box_3d_data['info']['bboxIds']
+bbox_ids = bounding_box_3d_data['info']['bboxIds'] 
 prim_paths = bounding_box_3d_data['info']['primPaths']
 id_to_labels = bounding_box_3d_data['info']['idToLabels']
 
@@ -40,6 +41,7 @@ print(f"bounding_box_3d_dd: {bounding_box_3d_dd}")
 print(f"bounding_box_3d_dd: {bounding_box_3d_dd.shape}")
 print(f"bounding_box_3d_info: {bounding_box_3d_data['info']}")
 print(f"prim_paths: {len(prim_paths)}")
+print(f"bbox_ids: {bbox_ids}")
 
 
 box_prim_path = f"/World/warehouse_with_forklifts/SM_CardBoxC_Copy_4/SM_CardBoxC_01"

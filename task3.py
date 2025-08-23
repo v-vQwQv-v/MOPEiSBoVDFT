@@ -9,9 +9,26 @@ It includes the following features:
     5. RackLarge
 """
 
+print("Script is loading...")
+
+# from omni.isaac.kit import SimulationApp
+# simulation_app = SimulationApp({
+#     "headless": True,
+#     "renderer": "RayTracedLighting",
+#     "width": 1280,
+#     "height": 720,
+#     # "exts": {
+#     #     "omni.kit.browser.sample": False,
+#     #     "omni.warp": False
+#     # }
+# })
+
+# import carb
 import omni.timeline
 import asyncio
 import omni.usd as usd
+
+
 import random
 import pxr.Gf as Gf
 from pxr import Usd, UsdGeom, Sdf
@@ -23,8 +40,10 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import json
 import omni.kit.commands as cmds
-import omni.kit.viewport.utility as vp_utils
-import gc
+# import omni.kit.viewport.utility as vp_utils
+# import gc
+from pathlib import Path
+import re
 
 """0. Parameters"""
 """0.0 Path Management"""
@@ -49,7 +68,7 @@ aParam_distriBoxWeightAlpha = 2.0 # Distribution of box weights
 """0.1.2 Time Parameters"""
 aParam_max_time = 10000
 aParam_iter = 0
-aParam_max_iter = 10
+aParam_max_iter = 300
 
 """0.1.3 Camera Parameters"""
 aParam_aimedPoint = np.array([0, 0, 1.5])
@@ -86,9 +105,9 @@ uPath_rdLarge_container = "/World/RackLarge_A1/Container_B09_40x30x22cm_PR_V_NVD
 uParam_pwbh_Space = [1.70, 1.90, 1.80] # Space of Pallet [L, W, H]
 uParam_pwbh_Height = 0.21 # Height of the first layer, in meters
 uParam_pwbh_mtxTrans = uParam_transScale * np.array([[1, 0,  0, -uParam_pwbh_Space[0]/2 + uParam_tolerance],
-                                                     [0, 1,  0, -uParam_pwbh_Space[1]/2 + uParam_tolerance],
-                                                     [0, 0,  1, uParam_pwbh_Height],
-                                                     [0, 0,  0, 1]], dtype=np.float32)
+                                                    [0, 1,  0, -uParam_pwbh_Space[1]/2 + uParam_tolerance],
+                                                    [0, 0,  1, uParam_pwbh_Height],
+                                                    [0, 0,  0, 1]], dtype=np.float32)
 uParam_pwbh_yaw0 = 90
 uPath_pwbh = "/World/WarehousePile_A6"
 uPath_pwbh_smBoxList_original = [
@@ -107,7 +126,7 @@ uPath_dumper = "/World/_9684481"
 print(f"Parameter Initialization Complete.")
 
 """0.3 Save Data"""
-source_classes = {
+source_class = {
     "rack": 0,
     "blockpallet": 1,
     "dumper": 2,
@@ -117,7 +136,6 @@ source_classes = {
     "cardbox_d": 6,
     "container": 7
 }
-target_classes = {"rack", "pallet", "dumper", "forklift", "cardbox_small", "cardbox_middle", "cardbox_large", "container"}
 
 """1. Functions"""
 def bboxDict_to_transform(bbox_dict):
@@ -128,7 +146,7 @@ def bboxDict_to_transform(bbox_dict):
             euler_angle: the rotation of the box in world coordinates (roll, pitch, yaw). shape: (3,)
     """
     corner = np.array([[bbox_dict[1], bbox_dict[2], bbox_dict[3]],
-                       [bbox_dict[4], bbox_dict[5], bbox_dict[6]]])
+                    [bbox_dict[4], bbox_dict[5], bbox_dict[6]]])
     trans_mtx = bbox_dict[7]
     center_local = np.mean(corner, axis=0)
     center_local_1 = np.append(center_local, 1.0)
@@ -172,7 +190,7 @@ def rotMtx2quaternion(R):
 def camPosOri(target_point, aimed_point):
     """
     Input: target_point: the position of the camera. shape: (3,)
-           aimed_point: the point that the camera is looking at. shape: (3,)
+        aimed_point: the point that the camera is looking at. shape: (3,)
     Output: q: quaternion. shape: (4,)
     """
     x2 = (aimed_point - target_point) / np.linalg.norm(aimed_point - target_point)
@@ -216,7 +234,7 @@ def deleteCopy(stage):
 def get_obj_pose(stage, prim_path):
     """
     Input: stage: the stage of the scene.
-           prim_path: the path of the object. e.g. "/World/warehouse_with_forklifts/SM_CardBoxC_Copy_0"
+        prim_path: the path of the object. e.g. "/World/warehouse_with_forklifts/SM_CardBoxC_Copy_0"
     Output: obj_pose: the pose of the object. [x, y, z, qx, qy, qz, qw]
     """
     prim = stage.GetPrimAtPath(prim_path)
@@ -248,7 +266,7 @@ def serialize_label_data(label_dict, filename):
     formatted_json = "{\n"
 
     # 普通字段直接写
-    for key in ["id", "camPose", "camParam"]:
+    for key in ["classId", "idx", "camPose_1", "camPose_2", "camParam"]:
         formatted_json += f'    "{key}": {json.dumps(label_dict[key], ensure_ascii=False)},\n'
 
     # instanceSemantics 保留原 shape 排列
@@ -264,8 +282,8 @@ def serialize_label_data(label_dict, filename):
         f.write(formatted_json)
 
 def pack_boxes_weighted_random(spaceSize, listBoxTypeSize, listBoxQuantity, 
-                               support_threshold=0.5, alpha=2.0, max_fail=50,
-                               w_x=1, w_y=1, w_z=0.5, rdYaws=False):
+                            support_threshold=0.5, alpha=2.0, max_fail=50,
+                            w_x=1, w_y=1, w_z=0.5, rdYaws=False):
     Ls, Ws, Hs = spaceSize
 
     # 初始化物品池
@@ -515,7 +533,22 @@ if not os.path.exists(path_dir_label):
 else:
     print(f"Label folder already exists.")
 
+path_dir = Path(path_dir_label)
+pattern = re.compile(r"label_(\d+)\.json")
+existing_iters = []
+
+# 遍历所有 json 文件并匹配编号
+for file in path_dir.glob("label_*.json"):
+    match = pattern.match(file.name)
+    if match:
+        existing_iters.append(int(match.group(1)))
+
+# 如果有匹配的编号文件，就从最大编号 + 1 开始，否则从 0 开始
+aParam_iter = max(existing_iters) + 1 if existing_iters else 0
+print(f"Starting iteration: {aParam_iter}")
+
 """2.2 Stage Preparation"""
+# stage = usd.get_context().get_stage().open_stage(USD_PATH)
 stage = usd.get_context().get_stage()
 stage.SetEditTarget(stage.GetRootLayer())
 layer = stage.GetRootLayer()
@@ -728,8 +761,8 @@ async def my_task():
             px = uParam_transScale * px
             py = uParam_transScale * py
             quantity_pwbh_smBox = [random.randint(0, aParam_max_pwbh_smBox[0]),
-                                   random.randint(0, aParam_max_pwbh_smBox[1]), 
-                                   random.randint(0, aParam_max_pwbh_smBox[2])]
+                                random.randint(0, aParam_max_pwbh_smBox[1]), 
+                                random.randint(0, aParam_max_pwbh_smBox[2])]
             """ 3.2.2.1 pwbh smBox Heaps Creation"""
             descriptors_pwbh_smBox = pack_boxes_weighted_random(
                 uParam_pwbh_Space,
@@ -877,9 +910,9 @@ async def my_task():
             await asyncio.sleep(0.5)
         
         print(f"Created {len(primList_rdLarge_created)} rdLarge(s), "
-              f"{len(primList_pwbh_created)} pwbh(s), "
-              f"{len(primList_dumper_created)} dumper(s), "
-              f"{len(primList_forklift_created)} forklift(s).")
+            f"{len(primList_pwbh_created)} pwbh(s), "
+            f"{len(primList_dumper_created)} dumper(s), "
+            f"{len(primList_forklift_created)} forklift(s).")
 
         """3.3 Camera Setting"""
         if not prim_camera.IsActive():
@@ -1017,23 +1050,26 @@ async def my_task():
             print(f"camParam with Frame_{aParam_iter}: False!")
 
         """3.5.2 Instance Semantics"""
-        listIdx = []
+        listIdx = [] # [classId, instIdx, primPath]
         try:
             instanceSemantic_data = instanceSemantic_annotator.get_data()
             print(f"Get instanceSemantic data with Frame_{aParam_iter} is {instanceSemantic_data is not None}")
             id_to_semantics = instanceSemantic_data['info']['idToSemantics']
+            id_to_labels = instanceSemantic_data['info']['idToLabels']
             mask_instanceSemantic = np.zeros((aParam_imgHeight, aParam_imgWidth), dtype=np.int32)
             mask_instanceSemantic.fill(-1)
             instIdx = 0
             for source_id, source_data in id_to_semantics.items():
-                source_id = int(source_id)
                 class_name = source_data.get("class", "").lower()
-                if class_name in source_classes:
+                if class_name in source_class:
+                    prim_path = id_to_labels.get(source_id, None)
+                    if prim_path is None:
+                        continue
                     mask_instanceSemantic[instanceSemantic_data['data'] == source_id] = instIdx
                     instIdx += 1
-                    listIdx.append([source_classes[class_name], instIdx, source_id])
-            listIdx = np.array(listIdx)
-            listIdx = listIdx[listIdx[:, 0].argsort()]
+                    listIdx.append([source_class[class_name], instIdx, prim_path])
+            listIdx = sorted(listIdx, key=lambda x: x[0])
+            print(f"InstanceSemantics with Frame_{aParam_iter} completed")
         except ValueError:
             print(f"instanceSemantics with Frame_{aParam_iter}: False!")
 
@@ -1043,11 +1079,10 @@ async def my_task():
             bounding_box_3d_data = bounding_box_3d_anno.get_data()
             print(f"Get bounding_box_3d data with Frame_{aParam_iter} is {bounding_box_3d_data is not None}")
             bounding_box_3d_dd = bounding_box_3d_data['data']
-            id_to_bounding_box = bounding_box_3d_data['info']['idToBoundingBox']
-            for _, instIdx, source_idx in listIdx.tolist():
-                if source_id not in id_to_bounding_box:
-                    continue  # 跳过无效id
-                bbox_dict = bounding_box_3d_dd[str(source_idx)]
+            bbox_prim_paths = bounding_box_3d_data['info']['primPaths']
+            for classId, instIdx, inst_prim_path in listIdx:
+                bbox_index = bbox_prim_paths.index(inst_prim_path)
+                bbox_dict = bounding_box_3d_dd[bbox_index]
                 center_world, size_world, euler_angle = bboxDict_to_transform(bbox_dict)
                 """
                 shape:
@@ -1056,24 +1091,32 @@ async def my_task():
                     size_world: [3,]
                     euler_angle: [3,]
                 """
-                objPose = np.concatenate(([instIdx], center_world, size_world, euler_angle))
-                listPose.append(objPose)
+                objPose = np.concatenate(([instIdx], center_world, size_world, euler_angle)).reshape(10,)
+                listPose.append(objPose.tolist())
+                print(f"Bounding Box with Frame_{aParam_iter} completed")
         except ValueError:
             print(f"Bounding Box with Frame_{aParam_iter}: False!")
 
         """3.4 Label To Json"""
         label = dict(
-            
-
+            classId = source_class,
+            idx = [[int(class_id), int(inst_id)] for class_id, inst_id, _ in listIdx],
+            instanceSemantics = mask_instanceSemantic.tolist(),
+            objPose = listPose,
+            camPose_1 = camPose_1,
+            camPose_2 = camPose_2,
+            camParam = camParam
         )
+        serialize_label_data(label, f"{path_dir_label}/label_{aParam_iter}.json")
+        print(f"Label with Frame_{aParam_iter} saved")
 
         """X.0 Test"""
         deleteCopy(stage)
         await asyncio.sleep(1)
-        gc.collect()
+        # gc.collect()
         await asyncio.sleep(1)
         aParam_iter += 1
+    print("Task Completion.")
 
 
 asyncio.ensure_future(my_task())
-print("Task Completion.")
